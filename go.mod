@@ -10,10 +10,10 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.5.0
 	github.com/mattermost/ldap v3.0.4+incompatible // indirect
-	github.com/mattermost/mattermost-server/v6 v6.0.0-20230411080029-50aabf6b933b
+	github.com/mattermost/mattermost-server/server/v8 v8.0.0-20230426132502-ac35bdff6859
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/common v0.42.0
-	github.com/sergi/go-diff v1.2.0 // indirect
+	github.com/sergi/go-diff v1.3.1 // indirect
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.2
 	github.com/valyala/fasthttp v1.7.1 // indirect
@@ -24,6 +24,8 @@ require (
 require (
 	github.com/graph-gophers/graphql-go v1.5.1-0.20230110080634-edea822f558a
 	github.com/vmihailenco/msgpack/v5 v5.3.5
+	github.com/wiggin77/merror v1.0.4
+	golang.org/x/exp v0.0.0-20230522175609-2e198f4a06a1
 )
 
 require (
@@ -99,7 +101,6 @@ require (
 	github.com/tinylib/msgp v1.1.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	github.com/wiggin77/merror v1.0.4 // indirect
 	github.com/wiggin77/srslog v1.0.1 // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20180127040702-4e3ac2762d5f // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect

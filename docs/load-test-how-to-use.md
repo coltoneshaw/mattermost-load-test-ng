@@ -56,7 +56,7 @@ The steps to load-test a new feature in production, after testing new actions lo
         - Open the Mattermost URL in browser to confirm the app is working.
         - At this point, you can check the server logs by [ssh-ing](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/terraform_loadtest.md#ssh-access-to-the-terraformed-hosts) into the app instance. Once there, open `/opt/mattermost/logs/mattermost.log`.
     - Gearing up to start the load-test:
-        - Configure `InstanceConfiguration` in the same `config.json` file (which, as mentioned earlier, populates the Mattermost server's database with required data for the load test). Note that a heavier config with `NumPosts` would take a very long time get populated. Please refer to the [note](/#Note) section below to manually populate the database from a backup, in order to bypass 'data-generation`.
+        - Configure `InstanceConfiguration` in the same `config.json` file (which, as mentioned earlier, populates the Mattermost server's database with required data for the load test). Note that a heavier config with `NumPosts` would take a very long time get populated. Please refer to the [note](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/load-test-how-to-use.md#note) section below to manually populate the database from a backup, in order to bypass 'data-generation`.
     
     - Start the load test with `go run ./cmd/ltctl loadtest start`.
         - Once a loadtest is running, its status can be checked with `go run ./cmd/ltctl loadtest status`.
@@ -94,7 +94,7 @@ Even without the framework, a general load-test workflow in the cloud will be si
 After all the code changes:
  - [Add tests](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/coverage.md#testing) if required. 
  - Run `make check-style`.
- - `go get -u github.com/mattermost/mattermost-server/v6@<commit-hash-in-master>` && `go mod tidy`
+ - `go get -u github.com/mattermost/mattermost-server/server/v8@<commit-hash-in-master>` && `go mod tidy`
  - Create the PR.
 
 #### Note:

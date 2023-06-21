@@ -9,22 +9,36 @@ The load-test agent currently supports only the email/password authentication me
 We define a load-test to be bounded when the number of simulated users is fixed.
 This is particularly useful when running performance comparisons between two clusters/builds.
 
-#### Note
-
-To manually run a bounded load-test using the [`coordinator`](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/coordinator.md) the [feedback loop](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/coordinator.md#the-feedback-loop) should be disabled. This can be done by either removing `MonitorConfig.Queries` or by disabling each query (by setting `Alert` to `false`).
-
-### What is an unbounded load-test?
+### What is an unbounded load-test
 
 We define a load-test to be unbounded when the number of simulated users can vary up to a pre-configured limit.
 This type of load-test is used to determine the capacity of a system and will output an estimated number of users.
 The rule of thumb is that when starting an unbounded load-test we should always shoot for more users than what we think an installation can support.
-`ClusterConfig.MaxActiveUsers` should be set to `AgentInstanceCount * UsersConfiguration.MaxActiveUsers`.
+
+### How do I configure a test to be bounded or unbounded?
+
+The nature of the test is controlled by how the [`coordinator`](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/coordinator.md) controls the [feedback loop](https://github.com/mattermost/mattermost-load-test-ng/blob/master/docs/coordinator.md#the-feedback-loop). If the coordinator is configured to decrease the users when some metrics surpass a threshold (e.g. the P99 latency in the server is over 2 seconds), then the test will be unbounded. If the coordinator does not monitor these metrics and just let all users connect freely, then the test will be bounded.
+
+To configure this, you need to take a look at the `MonitorConfig.Queries` configuration in the deployer:
+- If the array of queries is empty, or all of them are disabled (by setting `Alert` to `false`), the test is **bounded**.
+- If there is at least one query that is enabled, the test is **unbounded**.
+
+Note that in both cases, `ClusterConfig.MaxActiveUsers` should be set to `AgentInstanceCount * UsersConfiguration.MaxActiveUsers`.
 
 ### Can I use a pre-existing Mattermost or database deployment?
 
 Yes, you can use an existing Mattermost deployment, or just the database portion.
 
 Note: You should **not** utilize an existing production setup to loadtest against because the loadtest agent will create users, posts, teams and channels and utilize most of your server resources. Best practice is to clone your production setup and loadtest against that.
+
+### Can I export a Grafana dashboard for future reference?
+
+Yes, you can do so by using the feature to [publish a snapshot to Raintank](https://grafana.com/docs/grafana/latest/dashboards/share-dashboards-panels/#publish-a-snapshot). An example of what such a snapshot looks like: [MySQL bounded test comparing `v7.9.1` vs `v7.10.0-rc2`](https://snapshots.raintank.io/dashboard/snapshot/h356ygrRZIUFWf5u5cctLjFavu97lFR2?orgId=2).
+
+Two considerations:
+
+- Due to [this issue](https://github.com/grafana/grafana/issues/32585), you need to be logged in to access the Snapshot option in the Share dialog. Although logging in is not usually needed in these temporal instances, you can still do so for this purpose with the credentials `admin`/`admin`.
+- Note that a snapshot, although very useful for reference, is not a fully-functioning dashboard, so you will not be able to query new data using it. Take a look at the example above to understand how it works.
 
 #### Using an existing Mattermost deployment
 

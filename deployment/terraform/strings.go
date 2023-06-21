@@ -17,6 +17,7 @@ WorkingDirectory=/opt/mattermost
 User=ubuntu
 Group=ubuntu
 LimitNOFILE=49152
+Environment=MM_FEATUREFLAGS_POSTPRIORITY=true
 Environment=MM_FEATUREFLAGS_GRAPHQL=true
 
 [Install]
@@ -46,6 +47,24 @@ scrape_configs:
   - job_name: loadtest
     static_configs:
         - targets: [%s]
+`
+
+const pyroscopeConfig = `
+log-level: debug
+no-self-profiling: true
+
+scrape-configs:
+  - job-name: pyroscope
+    scheme: http
+    scrape-interval: 60s
+    enabled-profiles: [cpu, mem, goroutines]
+    static-configs:
+    - application: mattermost
+      spy-name: gospy
+      targets: [%s]
+    - application: agents
+      spy-name: gospy
+      targets: [%s]
 `
 
 const metricsHosts = `
