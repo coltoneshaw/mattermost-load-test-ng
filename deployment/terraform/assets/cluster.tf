@@ -50,7 +50,7 @@ resource "aws_instance" "app_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami
@@ -98,7 +98,7 @@ resource "aws_instance" "metrics_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami
@@ -149,7 +149,6 @@ resource "aws_instance" "proxy_server" {
   ami                         = var.aws_ami
   instance_type               = var.proxy_instance_type
   count                       = var.app_instance_count > 1 ? 1 : 0
-  associate_public_ip_address = true
   vpc_security_group_ids = [
     aws_security_group.proxy[0].id
   ]
@@ -164,7 +163,7 @@ resource "aws_instance" "proxy_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   provisioner "remote-exec" {
@@ -304,7 +303,7 @@ resource "aws_instance" "loadtest_agent" {
   connection {
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami                         = var.aws_ami
@@ -312,7 +311,6 @@ resource "aws_instance" "loadtest_agent" {
   key_name                    = aws_key_pair.key.id
   count                       = var.agent_instance_count
   subnet_id                   = var.cluster_subnet_id
-  associate_public_ip_address = true
 
   vpc_security_group_ids = [aws_security_group.agent.id]
 
@@ -605,7 +603,7 @@ resource "aws_instance" "job_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami

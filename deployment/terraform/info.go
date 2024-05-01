@@ -25,36 +25,36 @@ func displayInfo(output *Output) {
 
 	if output.HasAppServers() {
 		if output.HasProxy() {
-			fmt.Println("Mattermost URL: http://" + output.Proxy.PublicDNS)
+			fmt.Println("Mattermost URL: http://" + output.Proxy.PrivateDNS)
 		} else {
-			fmt.Println("Mattermost URL: http://" + output.Instances[0].PublicDNS + ":8065")
+			fmt.Println("Mattermost URL: http://" + output.Instances[0].PrivateDNS + ":8065")
 		}
 		fmt.Println("App Server(s):")
 		for _, instance := range output.Instances {
-			fmt.Println("- " + instance.Tags.Name + ": " + instance.PublicIP)
+			fmt.Println("- " + instance.Tags.Name + ": " + instance.PrivateIP)
 		}
 	}
 
 	if output.HasJobServer() {
 		fmt.Println("Job Server(s):")
 		for _, instance := range output.JobServers {
-			fmt.Println("- " + instance.Tags.Name + ": " + instance.PublicIP)
+			fmt.Println("- " + instance.Tags.Name + ": " + instance.PrivateIP)
 		}
 	}
 
 	if output.HasAgents() {
 		fmt.Println("Load Agent(s):")
 		for _, agent := range output.Agents {
-			fmt.Println("- " + agent.Tags.Name + ": " + agent.PublicIP)
+			fmt.Println("- " + agent.Tags.Name + ": " + agent.PrivateIP)
 		}
 
-		fmt.Println("Coordinator: " + output.Agents[0].PublicIP)
+		fmt.Println("Coordinator: " + output.Agents[0].PrivateIP)
 	}
 
 	if output.HasMetrics() {
-		fmt.Println("Grafana URL: http://" + output.MetricsServer.PublicIP + ":3000")
-		fmt.Println("Prometheus URL: http://" + output.MetricsServer.PublicIP + ":9090")
-		fmt.Println("Pyroscope URL: http://" + output.MetricsServer.PublicIP + ":4040")
+		fmt.Println("Grafana URL: http://" + output.MetricsServer.PrivateIP + ":3000")
+		fmt.Println("Prometheus URL: http://" + output.MetricsServer.PrivateIP + ":9090")
+		fmt.Println("Pyroscope URL: http://" + output.MetricsServer.PrivateIP + ":4040")
 	}
 	if output.HasDB() {
 		fmt.Println("DB Cluster Identifier: ", output.DBCluster.ClusterIdentifier)

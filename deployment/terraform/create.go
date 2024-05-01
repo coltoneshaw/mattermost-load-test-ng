@@ -199,10 +199,10 @@ func (t *Terraform) Create(initData bool) error {
 			siteURL = "http://" + t.config.SiteURL + ":8065"
 		// SiteURL not defined, multiple app nodes: we use the proxy's public DNS
 		case t.output.HasProxy():
-			siteURL = "http://" + t.output.Proxy.PublicDNS
+			siteURL = "http://" + t.output.Proxy.PrivateDNS
 		// SiteURL not defined, single app node: we use the app node's public DNS plus port
 		default:
-			siteURL = "http://" + t.output.Instances[0].PublicDNS + ":8065"
+			siteURL = "http://" + t.output.Instances[0].PrivateDNS + ":8065"
 		}
 
 		// Updating the config.json for each instance of app server
@@ -212,11 +212,11 @@ func (t *Terraform) Create(initData bool) error {
 
 		// The URL to ping cannot be the same as the site URL, since that one could contain a
 		// hostname that only instances know how to resolve
-		pingURL := t.output.Instances[0].PublicDNS + ":8065"
+		pingURL := t.output.Instances[0].PrivateDNS + ":8065"
 		if t.output.HasProxy() {
 			// Updating the nginx config on proxy server
 			t.setupProxyServer(extAgent)
-			pingURL = t.output.Proxy.PublicDNS
+			pingURL = t.output.Proxy.PrivateDNS
 		}
 
 		if err := pingServer("http://" + pingURL); err != nil {
@@ -235,7 +235,7 @@ func (t *Terraform) Create(initData bool) error {
 		defer wg.Done()
 		if t.output.HasElasticSearch() {
 			mlog.Info("Setting up Elasticsearch")
-			err := t.setupElasticSearchServer(extAgent, t.output.Instances[0].PublicIP)
+			err := t.setupElasticSearchServer(extAgent, t.output.Instances[0].PrivateIP)
 
 			if err != nil {
 				errorsChan <- fmt.Errorf("unable to setup Elasticsearch server: %w", err)
@@ -312,14 +312,14 @@ func (t *Terraform) Create(initData bool) error {
 
 func (t *Terraform) setupAppServers(extAgent *ssh.ExtAgent, uploadBinary bool, binaryPath string, siteURL string) error {
 	for _, val := range t.output.Instances {
-		err := t.setupMMServer(extAgent, val.PublicIP, siteURL, uploadBinary, binaryPath)
+		err := t.setupMMServer(extAgent, val.PrivateIP, siteURL, uploadBinary, binaryPath)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, val := range t.output.JobServers {
-		err := t.setupJobServer(extAgent, val.PublicIP, siteURL, uploadBinary, binaryPath)
+		err := t.setupJobServer(extAgent, val.PrivateIP, siteURL, uploadBinary, binaryPath)
 		if err != nil {
 			return err
 		}
@@ -610,7 +610,7 @@ func genNginxConfig() (string, error) {
 }
 
 func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent) {
-	ip := t.output.Proxy.PublicDNS
+	ip := t.output.Proxy.PrivateDNS
 
 	sshc, err := extAgent.NewClient(ip)
 	if err != nil {
@@ -694,7 +694,7 @@ func (t *Terraform) createAdminUser(extAgent *ssh.ExtAgent) error {
 		t.config.AdminPassword,
 	)
 	mlog.Info("Creating admin user:", mlog.String("cmd", cmd))
-	sshc, err := extAgent.NewClient(t.output.Instances[0].PublicIP)
+	sshc, err := extAgent.NewClient(t.output.Instances[0].PrivateIP)
 	if err != nil {
 		return err
 	}
@@ -720,7 +720,7 @@ func (t *Terraform) updatePostgresSettings(extAgent *ssh.ExtAgent) error {
 		return errors.New("no instances found in Terraform output")
 	}
 
-	sshc, err := extAgent.NewClient(t.output.Instances[0].PublicIP)
+	sshc, err := extAgent.NewClient(t.output.Instances[0].PrivateIP)
 	if err != nil {
 		return err
 	}
