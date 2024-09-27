@@ -24,7 +24,7 @@ data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
 
-data "http" "my_public_ip" {
+data "http" "my_private_ip" {
   url = "https://checkip.amazonaws.com"
 }
 
@@ -58,7 +58,7 @@ resource "aws_instance" "app_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami
@@ -151,7 +151,7 @@ resource "aws_instance" "metrics_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami
@@ -197,7 +197,7 @@ resource "aws_instance" "proxy_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   provisioner "remote-exec" {
@@ -330,7 +330,7 @@ resource "aws_instance" "loadtest_agent" {
   connection {
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami                         = var.aws_ami
@@ -361,7 +361,7 @@ resource "aws_security_group" "app" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.private_ip != "" ? ["${local.public_ip}/32", "${local.private_ip}/32"] : ["${local.public_ip}/32"]
+    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
   }
   ingress {
     from_port   = 8065
@@ -466,7 +466,7 @@ resource "aws_security_group_rule" "agent-ssh" {
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = local.private_ip != "" ? ["${local.public_ip}/32", "${local.private_ip}/32"] : ["${local.public_ip}/32"]
+  cidr_blocks       = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
   security_group_id = aws_security_group.agent.id
 }
 
@@ -519,7 +519,7 @@ resource "aws_security_group_rule" "metrics-ssh" {
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = local.private_ip != "" ? ["${local.public_ip}/32", "${local.private_ip}/32"] : ["${local.public_ip}/32"]
+  cidr_blocks       = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
   security_group_id = aws_security_group.metrics[0].id
 }
 
@@ -630,7 +630,7 @@ resource "aws_security_group" "proxy" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.private_ip != "" ? ["${local.public_ip}/32", "${local.private_ip}/32"] : ["${local.public_ip}/32"]
+    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
   }
 
   ingress {
@@ -657,7 +657,7 @@ resource "aws_instance" "job_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami
@@ -701,7 +701,7 @@ resource "aws_instance" "keycloak" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.public_ip
+    host = self.private_ip
   }
 
   ami           = var.aws_ami
@@ -747,7 +747,7 @@ resource "aws_security_group" "keycloak" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.private_ip != "" ? ["${local.public_ip}/32", "${local.private_ip}/32"] : ["${local.public_ip}/32"]
+    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
   }
 
   // To access keycloak
