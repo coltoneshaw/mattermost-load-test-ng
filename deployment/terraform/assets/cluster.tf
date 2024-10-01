@@ -178,7 +178,7 @@ resource "aws_instance" "proxy_server" {
   ami                         = var.aws_ami
   instance_type               = var.proxy_instance_type
   count                       = var.proxy_instance_count
-  associate_public_ip_address = true
+  associate_public_ip_address = false
   vpc_security_group_ids = [
     aws_security_group.proxy[0].id
   ]
@@ -334,7 +334,7 @@ resource "aws_instance" "loadtest_agent" {
   key_name                    = aws_key_pair.key.id
   count                       = var.agent_instance_count
   subnet_id                   = var.cluster_subnet_id
-  associate_public_ip_address = true
+  associate_public_ip_address = false
 
   vpc_security_group_ids = [aws_security_group.agent.id]
 
