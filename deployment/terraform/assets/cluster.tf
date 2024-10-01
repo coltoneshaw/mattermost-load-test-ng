@@ -24,16 +24,12 @@ data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
 
-data "http" "my_public_ip" {
-  url = "https://checkip.amazonaws.com"
-}
 
 data "external" "private_ip" {
   program = ["sh", "-c", "echo {\\\"ip\\\":\\\"$(hostname -i)\\\"}"]
 }
 
 locals {
-  public_ip  = chomp(data.http.my_public_ip.response_body)
   private_ip = data.external.private_ip.result.ip
 }
 
