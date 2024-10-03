@@ -17,6 +17,7 @@ data "aws_iam_policy_document" "es_assume_role" {
 }
 
 resource "aws_iam_role" "es_role" {
+  count              = var.es_instance_count > 0 && var.es_create_role ? 1 : 0
   name               = "${var.cluster_name}-es-role"
   assume_role_policy = data.aws_iam_policy_document.es_assume_role.json
 }
@@ -30,20 +31,21 @@ data "aws_iam_policy_document" "es_policy_document" {
 
   statement {
     effect = "Allow"
-    # Put and Delete are needed to register the repository since the client uploads and then deletes a test object to ensure everything's working as expected
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
     resources = ["arn:aws:s3:::${var.es_snapshot_repository}/*"]
   }
 }
 
 resource "aws_iam_policy" "es_policy" {
+  count  = var.es_instance_count > 0 && var.es_create_role ? 1 : 0
   name   = "${var.cluster_name}-es-policy"
   policy = data.aws_iam_policy_document.es_policy_document.json
 }
 
 resource "aws_iam_role_policy_attachment" "es_attach" {
-  role       = aws_iam_role.es_role.name
-  policy_arn = aws_iam_policy.es_policy.arn
+  count = var.es_instance_count > 0 && var.es_create_role ? 1 : 0
+  role = aws_iam_role.es_role[count.index].name
+  policy_arn = aws_iam_policy.es_policy[count.index].arn
 }
 
 /* MM-59316: For this to work, the AWS account needs to have a
@@ -67,13 +69,15 @@ resource "aws_iam_role_policy_attachment" "es_attach" {
    }
 */
 resource "aws_cloudwatch_log_group" "es_log_group" {
-  name = "${var.cluster_name}-log-group"
+  count = var.es_instance_count > 0 ? 1 : 0
+  name  = "${var.cluster_name}-log-group"
 }
 
 resource "aws_opensearch_domain" "es_server" {
   tags = {
     Name = "${var.cluster_name}-es_server"
   }
+  count = var.es_instance_count > 0 ? 1 : 0
 
   domain_name    = "${var.cluster_name}-es"
   engine_version = var.es_version
@@ -111,12 +115,8 @@ resource "aws_opensearch_domain" "es_server" {
   }
   CONFIG
 
-  depends_on = [
-    aws_iam_service_linked_role.es,
-  ]
-
   log_publishing_options {
-    cloudwatch_log_group_arn = aws_cloudwatch_log_group.es_log_group.arn
+    cloudwatch_log_group_arn = aws_cloudwatch_log_group.es_log_group[0].arn
     log_type                 = "ES_APPLICATION_LOGS"
   }
 
@@ -143,5 +143,7 @@ resource "aws_opensearch_domain" "es_server" {
     enabled = true
   }
 
-  count = var.es_instance_count > 0 ? 1 : 0
+  depends_on = [
+    aws_iam_service_linked_role.es,
+  ]
 }

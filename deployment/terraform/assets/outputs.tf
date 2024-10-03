@@ -28,7 +28,7 @@ output "elasticServer" {
 }
 
 output "elasticRoleARN" {
-  value = aws_iam_role.es_role.arn
+  value = var.es_instance_count > 0 && var.es_create_role ? aws_iam_role.es_role[0].arn : ""
 }
 
 output "redisServer" {
