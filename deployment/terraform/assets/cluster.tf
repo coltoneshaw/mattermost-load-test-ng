@@ -357,7 +357,7 @@ resource "aws_security_group" "app" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
+    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32"] : ["${local.private_ip}/32"]
   }
   ingress {
     from_port   = 8065
@@ -462,7 +462,7 @@ resource "aws_security_group_rule" "agent-ssh" {
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
+  cidr_blocks       = local.private_ip != "" ? ["${local.private_ip}/32"] : ["${local.private_ip}/32"]
   security_group_id = aws_security_group.agent.id
 }
 
@@ -515,7 +515,7 @@ resource "aws_security_group_rule" "metrics-ssh" {
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  cidr_blocks       = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
+  cidr_blocks       = local.private_ip != "" ? ["${local.private_ip}/32"] : ["${local.private_ip}/32"]
   security_group_id = aws_security_group.metrics[0].id
 }
 
@@ -626,7 +626,7 @@ resource "aws_security_group" "proxy" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
+    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32"] : ["${local.private_ip}/32"]
   }
 
   ingress {
@@ -743,7 +743,7 @@ resource "aws_security_group" "keycloak" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32", "${local.private_ip}/32"] : ["${local.private_ip}/32"]
+    cidr_blocks = local.private_ip != "" ? ["${local.private_ip}/32"] : ["${local.private_ip}/32"]
   }
 
   // To access keycloak
