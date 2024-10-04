@@ -27,9 +27,9 @@ func displayInfo(output *Output) {
 
 	if output.HasAppServers() {
 		if output.HasProxy() {
-			fmt.Println("Mattermost URL: http://" + output.Proxies[0].PublicDNS)
+			fmt.Println("Mattermost URL: http://" + output.Proxies[0].PrivateDNS)
 		} else {
-			fmt.Println("Mattermost URL: http://" + output.Instances[0].PublicDNS + ":8065")
+			fmt.Println("Mattermost URL: http://" + output.Instances[0].PrivateDNS + ":8065")
 		}
 		fmt.Println("App Server(s):")
 		for _, instance := range output.Instances {
