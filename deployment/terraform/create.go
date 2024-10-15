@@ -106,28 +106,17 @@ func (t *Terraform) Create(initData bool) error {
 		return err
 	}
 
-	if err := validateLicense(t.config.MattermostLicenseFile); err != nil {
-		return fmt.Errorf("license validation failed: %w", err)
+	// Validate the license only if we deploy app nodes;
+	// otherwise we don't need a license at all
+	if t.config.AppInstanceCount > 0 {
+		if err := validateLicense(t.config.MattermostLicenseFile); err != nil {
+			return fmt.Errorf("license validation failed: %w", err)
+		}
 	}
 
 	extAgent, err := ssh.NewAgent()
 	if err != nil {
 		return err
-	}
-
-	// If we are using a restored cluster, first we need to import
-	// it into Terraform state.
-	if t.config.TerraformDBSettings.ClusterIdentifier != "" {
-		var params []string
-		params = append(params, "import")
-		params = append(params, t.getParams()...)
-		params = append(params, "-state="+t.getStatePath())
-		params = append(params, "aws_rds_cluster.db_cluster", t.config.TerraformDBSettings.ClusterIdentifier)
-
-		err = t.runCommand(nil, params...)
-		if err != nil {
-			return err
-		}
 	}
 
 	var uploadPath string
@@ -268,7 +257,7 @@ func (t *Terraform) Create(initData bool) error {
 		if t.output.HasProxy() {
 			for _, inst := range t.output.Proxies {
 				// Updating the nginx config on proxy server
-				t.setupProxyServer(extAgent, inst.PrivateDNS)
+				t.setupProxyServer(extAgent, inst)
 			}
 			// We can ping the server through any of the proxies, doesn't matter here.
 			pingURL = t.output.Proxies[0].PrivateDNS
@@ -376,14 +365,14 @@ func (t *Terraform) Create(initData bool) error {
 
 func (t *Terraform) setupAppServers(extAgent *ssh.ExtAgent, uploadBinary bool, uploadRelease bool, uploadPath string, siteURL string) error {
 	for _, val := range t.output.Instances {
-		err := t.setupMMServer(extAgent, val.PrivateIP, siteURL, uploadBinary, uploadRelease, uploadPath)
+		err := t.setupMMServer(extAgent, val.PublicIP, siteURL, uploadBinary, uploadRelease, uploadPath, val.Tags.Name)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, val := range t.output.JobServers {
-		err := t.setupJobServer(extAgent, val.PrivateIP, siteURL, uploadBinary, uploadRelease, uploadPath)
+		err := t.setupJobServer(extAgent, val.PublicIP, siteURL, uploadBinary, uploadRelease, uploadPath, val.Tags.Name)
 		if err != nil {
 			return err
 		}
@@ -392,15 +381,15 @@ func (t *Terraform) setupAppServers(extAgent *ssh.ExtAgent, uploadBinary bool, u
 	return nil
 }
 
-func (t *Terraform) setupMMServer(extAgent *ssh.ExtAgent, ip, siteURL string, uploadBinary bool, uploadRelease bool, uploadPath string) error {
-	return t.setupAppServer(extAgent, ip, siteURL, mattermostServiceFile, uploadBinary, uploadRelease, uploadPath, !t.output.HasJobServer())
+func (t *Terraform) setupMMServer(extAgent *ssh.ExtAgent, ip, siteURL string, uploadBinary bool, uploadRelease bool, uploadPath string, instanceName string) error {
+	return t.setupAppServer(extAgent, ip, siteURL, mattermostServiceFile, uploadBinary, uploadRelease, uploadPath, !t.output.HasJobServer(), instanceName)
 }
 
-func (t *Terraform) setupJobServer(extAgent *ssh.ExtAgent, ip, siteURL string, uploadBinary bool, uploadRelease bool, uploadPath string) error {
-	return t.setupAppServer(extAgent, ip, siteURL, jobServerServiceFile, uploadBinary, uploadRelease, uploadPath, true)
+func (t *Terraform) setupJobServer(extAgent *ssh.ExtAgent, ip, siteURL string, uploadBinary bool, uploadRelease bool, uploadPath string, instanceName string) error {
+	return t.setupAppServer(extAgent, ip, siteURL, jobServerServiceFile, uploadBinary, uploadRelease, uploadPath, true, instanceName)
 }
 
-func (t *Terraform) setupAppServer(extAgent *ssh.ExtAgent, ip, siteURL, serviceFile string, uploadBinary bool, uploadRelease bool, uploadPath string, jobServerEnabled bool) error {
+func (t *Terraform) setupAppServer(extAgent *ssh.ExtAgent, ip, siteURL, serviceFile string, uploadBinary bool, uploadRelease bool, uploadPath string, jobServerEnabled bool, instanceName string) error {
 	sshc, err := extAgent.NewClient(ip)
 	if err != nil {
 		return fmt.Errorf("error in getting ssh connection to %q: %w", ip, err)
@@ -412,6 +401,11 @@ func (t *Terraform) setupAppServer(extAgent *ssh.ExtAgent, ip, siteURL, serviceF
 		}
 	}()
 
+	otelcolConfig, err := renderAppOtelcolConfig(instanceName, t.output.MetricsServer.PrivateIP)
+	if err != nil {
+		return fmt.Errorf("unable to render otelcol config template: %w", err)
+	}
+
 	// Upload files
 	batch := []uploadInfo{
 		{srcData: strings.TrimPrefix(serverSysctlConfig, "\n"), dstPath: "/etc/sysctl.conf"},
@@ -419,6 +413,7 @@ func (t *Terraform) setupAppServer(extAgent *ssh.ExtAgent, ip, siteURL, serviceF
 		{srcData: strings.TrimPrefix(limitsConfig, "\n"), dstPath: "/etc/security/limits.conf"},
 		{srcData: strings.TrimPrefix(prometheusNodeExporterConfig, "\n"), dstPath: "/etc/default/prometheus-node-exporter"},
 		{srcData: strings.TrimSpace(fmt.Sprintf(netpeekServiceFile, gossipPort)), dstPath: "/lib/systemd/system/netpeek.service"},
+		{srcData: strings.TrimSpace(otelcolConfig), dstPath: "/etc/otelcol-contrib/config.yaml"},
 	}
 
 	// If SiteURL is set, update /etc/hosts to point to the correct IP
@@ -439,9 +434,14 @@ func (t *Terraform) setupAppServer(extAgent *ssh.ExtAgent, ip, siteURL, serviceF
 		return fmt.Errorf("batch upload failed: %w", err)
 	}
 
-	cmd := "sudo systemctl daemon-reload && sudo service mattermost stop"
+	cmd := "sudo systemctl restart otelcol-contrib"
 	if out, err := sshc.RunCommand(cmd); err != nil {
-		return fmt.Errorf("error running ssh command %q, ourput: %q: %w", cmd, string(out), err)
+		return fmt.Errorf("error running ssh command %q, output: %q: %w", cmd, string(out), err)
+	}
+
+	cmd = "sudo systemctl daemon-reload && sudo service mattermost stop"
+	if out, err := sshc.RunCommand(cmd); err != nil {
+		return fmt.Errorf("error running ssh command %q, output: %q: %w", cmd, string(out), err)
 	}
 
 	// provision MM build
@@ -637,8 +637,7 @@ func (t *Terraform) setupElasticSearchServer(extAgent *ssh.ExtAgent, ip string) 
 
 	// Wait until the snapshot is completely restored, or the user-specified
 	// timeout is triggered, whatever happens first
-	restoreTimeout := time.Duration(esSettings.RestoreTimeoutMinutes) * time.Minute
-	if err := waitForSnapshot(restoreTimeout, os, snapshotIndices); err != nil {
+	if err := t.waitForSnapshot(os, snapshotIndices); err != nil {
 		return fmt.Errorf("failed to wait for snapshot completion: %w", err)
 	}
 
@@ -663,7 +662,9 @@ func (t *Terraform) setupElasticSearchServer(extAgent *ssh.ExtAgent, ip string) 
 
 // waitForSnapshot blocks until the snapshot is fully restored or the provided
 // timeout is reached
-func waitForSnapshot(dur time.Duration, es *opensearch.Client, snapshotIndices []string) error {
+func (t *Terraform) waitForSnapshot(es *opensearch.Client, snapshotIndices []string) error {
+	dur := time.Duration(t.config.ElasticSearchSettings.RestoreTimeoutMinutes) * time.Minute
+	esDiskSpaceBytes := t.config.StorageSizes.ElasticSearch * 1024 * 1024 * 1024
 	timeout := time.After(dur)
 	for {
 		select {
@@ -676,13 +677,15 @@ func waitForSnapshot(dur time.Duration, es *opensearch.Client, snapshotIndices [
 			}
 
 			// Compute progress
-			var indicesDone, indicesInProgress, totalPerc int
+			var indicesDone, indicesInProgress, totalPerc, totalIndexSize int
 			for _, i := range indicesRecovery {
 				if i.Stage == "DONE" {
 					indicesDone++
 				} else {
 					indicesInProgress++
 				}
+
+				totalIndexSize += i.Size
 
 				// Remove the trailing "%" and the dot, so 75.8% is converted to 758
 				percString := strings.ReplaceAll(i.Percent[:len(i.Percent)-1], ".", "")
@@ -691,6 +694,10 @@ func waitForSnapshot(dur time.Duration, es *opensearch.Client, snapshotIndices [
 					return fmt.Errorf("percentage %q cannot be parsed: %w", i.Percent, err)
 				}
 				totalPerc += perc
+			}
+
+			if totalIndexSize > esDiskSpaceBytes {
+				return fmt.Errorf("total index size to be restored: %d bytes, greater than configured disk space %d bytes", totalIndexSize, esDiskSpaceBytes)
 			}
 
 			// Finish when all indices are marked as "DONE"
@@ -706,7 +713,9 @@ func waitForSnapshot(dur time.Duration, es *opensearch.Client, snapshotIndices [
 				mlog.String("avg % completed", fmt.Sprintf("%.2f", avgPerc)),
 				mlog.Int("indices waiting", indicesWaiting),
 				mlog.Int("indices in progress", indicesInProgress),
-				mlog.Int("indices recovered", indicesDone))
+				mlog.Int("indices recovered", indicesDone),
+				mlog.Int("total index size", totalIndexSize),
+			)
 		}
 	}
 }
@@ -740,7 +749,7 @@ func waitForGreenCluster(dur time.Duration, es *opensearch.Client) error {
 }
 
 func genNginxConfig() (string, error) {
-	data := map[string]string{
+	data := map[string]any{
 		"tcpNoDelay": "off",
 	}
 	if val := os.Getenv(deployment.EnvVarTCPNoDelay); strings.ToLower(val) == "on" {
@@ -769,7 +778,9 @@ func (t *Terraform) getProxyInstanceInfo() (*types.InstanceTypeInfo, error) {
 	return &descOutput.InstanceTypes[0], nil
 }
 
-func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent, ip string) {
+func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent, instance Instance) {
+	ip := instance.PublicDNS
+
 	sshc, err := extAgent.NewClient(ip)
 	if err != nil {
 		mlog.Error("error in getting ssh connection", mlog.String("ip", ip), mlog.Err(err))
@@ -819,13 +830,19 @@ func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent, ip string) {
 			return
 		}
 
-		nginxSiteConfig, err := fillConfigTemplate(nginxSiteConfigTmpl, map[string]string{
+		nginxSiteConfig, err := fillConfigTemplate(nginxSiteConfigTmpl, map[string]any{
 			"backends":     backends,
 			"cacheObjects": cacheObjects,
 			"cacheSize":    cacheSize,
 		})
 		if err != nil {
 			mlog.Error("Failed to generate nginx site config", mlog.Err(err))
+			return
+		}
+
+		otelcolConfig, err := renderProxyOtelcolConfig(instance.Tags.Name, t.output.MetricsServer.PrivateIP)
+		if err != nil {
+			mlog.Error("unable to render otelcol config template", mlog.String("proxy", instance.Tags.Name), mlog.Err(err))
 			return
 		}
 
@@ -837,14 +854,21 @@ func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent, ip string) {
 			{srcData: strings.TrimLeft(nginxConfig, "\n"), dstPath: "/etc/nginx/nginx.conf"},
 			{srcData: strings.TrimLeft(limitsConfig, "\n"), dstPath: "/etc/security/limits.conf"},
 			{srcData: strings.TrimPrefix(prometheusNodeExporterConfig, "\n"), dstPath: "/etc/default/prometheus-node-exporter"},
+			{srcData: strings.TrimSpace(otelcolConfig), dstPath: "/etc/otelcol-contrib/config.yaml"},
 		}
 		if err := uploadBatch(sshc, batch); err != nil {
 			mlog.Error("batch upload failed", mlog.Err(err))
 			return
 		}
 
+		cmd := "sudo systemctl restart otelcol-contrib"
+		if out, err := sshc.RunCommand(cmd); err != nil {
+			mlog.Error("error running ssh command", mlog.String("output", string(out)), mlog.String("cmd", cmd), mlog.Err(err))
+			return
+		}
+
 		incRXSizeCmd := fmt.Sprintf("sudo ethtool -G $(ip route show to default | awk '{print $5}') rx %d", rxQueueSize)
-		cmd := fmt.Sprintf("%s && sudo sysctl -p && sudo service nginx restart", incRXSizeCmd)
+		cmd = fmt.Sprintf("%s && sudo sysctl -p && sudo service nginx restart", incRXSizeCmd)
 		if out, err := sshc.RunCommand(cmd); err != nil {
 			mlog.Error("error running ssh command", mlog.String("output", string(out)), mlog.String("cmd", cmd), mlog.Err(err))
 			return

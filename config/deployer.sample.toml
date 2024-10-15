@@ -2,6 +2,7 @@
 AWSAMI = 'ami-003d3d03cfe1b0468'
 AWSProfile = 'mm-loadtest'
 AWSRegion = 'us-east-1'
+AWSAvailabilityZone = 'us-east-1c'
 
 # Mattermost configuration
 AdminEmail = 'sysadmin@sample.mattermost.com'
@@ -22,6 +23,10 @@ EnableAgentFullLogs = true
 # App servers configuration
 AppInstanceCount = 1
 AppInstanceType = 'c5.xlarge'
+AppAttachIAMProfile = ''
+
+# Metrics instance configuration
+MetricsInstanceType = 't3.xlarge'
 
 # Cluster configuration
 ClusterName = 'loadtest'
@@ -141,3 +146,4 @@ Password = 'mostest80098bigpass_'
 UserName = 'mmuser'
 
 [CustomTags]
+

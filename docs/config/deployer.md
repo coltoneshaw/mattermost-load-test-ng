@@ -12,12 +12,18 @@ AWS profile to use for the deployment. Also used for all AWS CLI commands run lo
 
 AWS region to use for the deployment.  See the [AWS docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html) for more information.
 
+## AWSAvailabilityZone
+
+AWS Availability Zone in which to deploy instances. See the [AWS docs](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/using-regions-availability-zones.html) for more information.
+
+> [!TIP]
+> Deploying instances in the same Availability Zone can greatly reduce traffic costs. Refer to [data transfer pricing](https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region) for more details.
+
 ## AWSAMI
 
 *string*
 
 AWS AMI to use for the deployment. This is the image used for all EC2 instances created by the loadtest tool. See the [AWS AMI](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/AMIs.html) docs for more information. We suggest Ubuntu 20.04 or 22.04. Note, the AMI could change between AWS Regions.
-
 
 
 ## ClusterName
@@ -59,6 +65,12 @@ When this value is greater than one, an S3 bucket is automatically created in th
 *string*
 
 The type of the EC2 instance of the application server. See type [here](https://aws.amazon.com/ec2/instance-types/). It is recommended to use c5 instances for consistent performance.
+
+## AppAttachIAMProfile
+
+*string*
+
+The IAM profile to attach to the application server. This is useful if you need to give the application server access to other existing AWS resources.
 
 ## AgentInstanceCount
 
@@ -329,8 +341,8 @@ Whether to use SSE or not.
 
 *string*
 
-The URL from where to download Mattermost release. This can also point to a local binary path if the user wants to run a load-test on a custom server build.  
-The path should be prefixed with `file://` and point to the binary of the server (e.g. `file:///home/user/go/src/github.com/mattermost/mattermost/server/bin/mattermost`).  
+The URL from where to download Mattermost release. This can also point to a local binary path if the user wants to run a load-test on a custom server build.
+The path should be prefixed with `file://` and point to the binary of the server (e.g. `file:///home/user/go/src/github.com/mattermost/mattermost/server/bin/mattermost`).
 Only the binary gets replaced, and the rest of the build comes from the latest stable release.
 
 ## MattermostLicenseFile

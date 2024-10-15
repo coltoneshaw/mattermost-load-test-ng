@@ -139,11 +139,19 @@ func (t *Terraform) configureAndRunAgents(extAgent *ssh.ExtAgent) error {
 			buf := bytes.NewBufferString("")
 			tpl.Execute(buf, tplVars)
 
+			otelcolConfig, err := renderAgentOtelcolConfig(instance.Tags.Name, t.output.MetricsServer.PrivateIP)
+			if err != nil {
+				mlog.Error("unable to render otelcol config", mlog.Int("agent", agentNumber), mlog.Err(err))
+				foundErr.Store(true)
+				return
+			}
+
 			batch := []uploadInfo{
 				{srcData: strings.TrimPrefix(buf.String(), "\n"), dstPath: "/lib/systemd/system/ltapi.service", msg: "Uploading load-test api service file"},
 				{srcData: strings.TrimPrefix(clientSysctlConfig, "\n"), dstPath: "/etc/sysctl.conf"},
 				{srcData: strings.TrimPrefix(limitsConfig, "\n"), dstPath: "/etc/security/limits.conf"},
 				{srcData: strings.TrimPrefix(prometheusNodeExporterConfig, "\n"), dstPath: "/etc/default/prometheus-node-exporter"},
+				{srcData: strings.TrimSpace(otelcolConfig), dstPath: "/etc/otelcol-contrib/config.yaml"},
 			}
 
 			if t.config.UsersFilePath != "" {
@@ -164,6 +172,13 @@ func (t *Terraform) configureAndRunAgents(extAgent *ssh.ExtAgent) error {
 
 			if err := uploadBatch(sshc, batch); err != nil {
 				mlog.Error("error uploading batch", mlog.Err(err), mlog.Int("agent", agentNumber))
+				foundErr.Store(true)
+				return
+			}
+
+			cmd = "sudo systemctl restart otelcol-contrib"
+			if out, err := sshc.RunCommand(cmd); err != nil {
+				mlog.Error("error running ssh command", mlog.Int("agent", agentNumber), mlog.String("cmd", cmd), mlog.String("out", string(out)), mlog.Err(err))
 				foundErr.Store(true)
 				return
 			}
@@ -218,7 +233,8 @@ func (t *Terraform) initLoadtest(extAgent *ssh.ExtAgent, initData bool) error {
 
 	if initData && t.config.TerraformDBSettings.ClusterIdentifier == "" {
 		mlog.Info("Populating initial data for load-test", mlog.String("agent", ip))
-		cmd := fmt.Sprintf("cd mattermost-load-test-ng && ./bin/ltagent init --user-prefix '%s'", t.output.Agents[0].Tags.Name)
+		cmd := fmt.Sprintf("cd mattermost-load-test-ng && ./bin/ltagent init --user-prefix '%s' --server-url 'http://%s:8065'",
+			t.output.Agents[0].Tags.Name, t.output.Instances[0].PrivateIP)
 		if out, err := sshc.RunCommand(cmd); err != nil {
 			// TODO: make this fully atomic. See MM-23998.
 			// ltagent init should drop teams and channels before creating them.

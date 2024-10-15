@@ -204,7 +204,7 @@ func (t *Terraform) getStatePath() string {
 	return statePath
 }
 
-func fillConfigTemplate(configTmpl string, data map[string]string) (string, error) {
+func fillConfigTemplate(configTmpl string, data map[string]any) (string, error) {
 	var buf bytes.Buffer
 	tmpl := template.New("template")
 	tmpl, err := tmpl.Parse(configTmpl)
@@ -221,12 +221,14 @@ func (t *Terraform) getParams() []string {
 	return []string{
 		"-var", fmt.Sprintf("aws_profile=%s", t.config.AWSProfile),
 		"-var", fmt.Sprintf("aws_region=%s", t.config.AWSRegion),
+		"-var", fmt.Sprintf("aws_az=%s", t.config.AWSAvailabilityZone),
 		"-var", fmt.Sprintf("aws_ami=%s", t.config.AWSAMI),
 		"-var", fmt.Sprintf("cluster_name=%s", t.config.ClusterName),
 		"-var", fmt.Sprintf("cluster_vpc_id=%s", t.config.ClusterVpcID),
 		"-var", fmt.Sprintf("cluster_subnet_id=%s", t.config.ClusterSubnetID),
 		"-var", fmt.Sprintf("app_instance_count=%d", t.config.AppInstanceCount),
 		"-var", fmt.Sprintf("app_instance_type=%s", t.config.AppInstanceType),
+		"-var", fmt.Sprintf("app_attach_iam_profile=%s", t.config.AppAttachIAMProfile),
 		"-var", fmt.Sprintf("agent_instance_count=%d", t.config.AgentInstanceCount),
 		"-var", fmt.Sprintf("agent_instance_type=%s", t.config.AgentInstanceType),
 		"-var", fmt.Sprintf("es_instance_count=%d", t.config.ElasticSearchSettings.InstanceCount),
@@ -266,6 +268,7 @@ func (t *Terraform) getParams() []string {
 		"-var", fmt.Sprintf("redis_param_group_name=%s", t.config.RedisSettings.ParameterGroupName),
 		"-var", fmt.Sprintf("redis_engine_version=%s", t.config.RedisSettings.EngineVersion),
 		"-var", fmt.Sprintf("custom_tags=%s", t.config.CustomTags),
+		"-var", fmt.Sprintf("metrics_instance_type=%s", t.config.MetricsInstanceType),
 	}
 }
 

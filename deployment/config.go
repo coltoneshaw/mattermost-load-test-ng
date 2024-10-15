@@ -23,6 +23,9 @@ type Config struct {
 	AWSProfile string `default:"mm-loadtest"`
 	// AWSRegion is the region used to deploy all resources.
 	AWSRegion string `default:"us-east-1"`
+	// AWSAvailabilityZone defines the Availability Zone
+	// in which instances should be deployed.
+	AWSAvailabilityZone string `default:"us-east-1c"`
 	// AWSAMI is the AMI to use for all EC2 instances.
 	AWSAMI string `default:"ami-0fa37863afb290840"`
 	// ClusterName is the name of the cluster.
@@ -35,6 +38,10 @@ type Config struct {
 	AppInstanceCount int `default:"1" validate:"range:[0,)"`
 	// Type of the EC2 instance for app.
 	AppInstanceType string `default:"c7i.xlarge" validate:"notempty"`
+	// IAM role to attach to the app servers
+	AppAttachIAMProfile string `default:""`
+	// Type of the EC2 instance for metrics.
+	MetricsInstanceType string `default:"t3.xlarge" validate:"notempty"`
 	// Number of agents, first agent and coordinator will share the same instance.
 	AgentInstanceCount int `default:"2" validate:"range:[0,)"`
 	// Type of the EC2 instance for agent.
@@ -62,7 +69,7 @@ type Config struct {
 	// 3. If it is a file:// pointing to a tar.gz, use that as the Mattermost release.
 	MattermostDownloadURL string `default:"https://latest.mattermost.com/mattermost-enterprise-linux" validate:"url"`
 	// Path to the Mattermost EE license file.
-	MattermostLicenseFile string `default:"" validate:"file"`
+	MattermostLicenseFile string `default:"" validate:"empty|file"`
 	// Optional path to a partial Mattermost config file to be applied as patch during
 	// app server deployment.
 	MattermostConfigPatchFile string `default:""`
@@ -75,7 +82,7 @@ type Config struct {
 	// URL from where to download load-test-ng binaries and configuration files.
 	// The configuration files provided in the package will be overridden in
 	// the deployment process.
-	LoadTestDownloadURL   string `default:"https://github.com/mattermost/mattermost-load-test-ng/releases/download/v1.20.0/mattermost-load-test-ng-v1.20.0-linux-amd64.tar.gz" validate:"url"`
+	LoadTestDownloadURL   string `default:"https://github.com/mattermost/mattermost-load-test-ng/releases/download/v1.21.0/mattermost-load-test-ng-v1.21.0-linux-amd64.tar.gz" validate:"url"`
 	ElasticSearchSettings ElasticSearchSettings
 	RedisSettings         RedisSettings
 	JobServerSettings     JobServerSettings
@@ -144,7 +151,7 @@ type StorageSizes struct {
 	// Size, in GiB, for the storage of the job server instances
 	Job int `default:"50"`
 	// Size, in GiB, for the storage of the elasticsearch instances
-	ElasticSearch int `default:"20"`
+	ElasticSearch int `default:"100"`
 	// Size, in GiB, for the storage of the keycloak instances
 	KeyCloak int `default:"10"`
 }
