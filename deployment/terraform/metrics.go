@@ -245,7 +245,7 @@ func (t *Terraform) setupMetrics(extAgent *ssh.ExtAgent) error {
 	mlog.Info("Updating Prometheus config", mlog.String("host", t.output.MetricsServer.PrivateIP))
 	prometheusConfigFile := fmt.Sprintf(prometheusConfig,
 		strings.Join(quoteAll(nodeTargets), ","),
-		strings.Join(quoteAll(mmTargets), ","),
+		strings.Join(quoteAll(t.config.MattermostEndpoints), ","),
 		strings.Join(quoteAll(esTargets), ","),
 		strings.Join(quoteAll(ltTargets), ","),
 		strings.Join(quoteAll(keycloakTargets), ""),
@@ -261,7 +261,7 @@ func (t *Terraform) setupMetrics(extAgent *ssh.ExtAgent) error {
 	mlog.Info("Updating Pyroscope config", mlog.String("host", t.output.MetricsServer.PrivateIP))
 	pyroscopeMMTargets := []string{}
 	if t.config.PyroscopeSettings.EnableAppProfiling {
-		pyroscopeMMTargets = mmTargets
+		pyroscopeMMTargets = t.config.MattermostEndpoints
 	}
 	pyroscopeLTTargets := []string{}
 	if t.config.PyroscopeSettings.EnableAgentProfiling {

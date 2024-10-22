@@ -125,6 +125,10 @@ type Config struct {
 	// CustomTags is an optional list of key-value pairs, which will be used as default
 	// tags for all resources deployed
 	CustomTags TerraformMap
+
+	// A list of custom endpoints to extend into the prometheous mattermost config
+
+	MattermostEndpoints []string
 }
 
 // TerraformMap is a map of string -> string that serializes to the format expected by
