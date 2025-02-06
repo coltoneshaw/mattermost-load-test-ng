@@ -46,16 +46,12 @@ exporters:
     endpoint: "http://127.0.0.1:3100/otlp"
     tls:
       insecure: true
-  debug:
-    verbosity: detailed
-    sampling_initial: 5
-    sampling_thereafter: 200
 
 service:
   pipelines:
     logs:
       receivers: [filelog/agent,filelog/coordinator,]
-      exporters: [otlphttp/logs,debug]
+      exporters: [otlphttp/logs]
 `
 	expectedAppConfg = `
 receivers:
@@ -84,16 +80,12 @@ exporters:
     endpoint: "http://127.0.0.1:3100/otlp"
     tls:
       insecure: true
-  debug:
-    verbosity: detailed
-    sampling_initial: 5
-    sampling_thereafter: 200
 
 service:
   pipelines:
     logs:
       receivers: [filelog/app,]
-      exporters: [otlphttp/logs,debug]
+      exporters: [otlphttp/logs]
 `
 
 	expectedProxyConf = `
@@ -105,7 +97,7 @@ receivers:
       http:
         endpoint: 0.0.0.0:4318
 
-  filelog/proxy:
+  filelog/proxy_error:
     include: [ /var/log/nginx/error.log ]
     resource:
       service.name: "proxy"
@@ -118,22 +110,29 @@ receivers:
           layout: '%Y/%m/%d %H:%M:%S'
         severity:
           parse_from: attributes.sev
+  filelog/proxy_access:
+    include: [ /var/log/nginx/access.log ]
+    resource:
+      service.name: "proxy"
+      service.instance.id: "instance-name"
+    operators:
+      - type: json_parser
+        timestamp:
+          layout: 's.ms'
+          layout_type: epoch
+          parse_from: attributes.ts
 
 exporters:
   otlphttp/logs:
     endpoint: "http://127.0.0.1:3100/otlp"
     tls:
       insecure: true
-  debug:
-    verbosity: detailed
-    sampling_initial: 5
-    sampling_thereafter: 200
 
 service:
   pipelines:
     logs:
-      receivers: [filelog/proxy,]
-      exporters: [otlphttp/logs,debug]
+      receivers: [filelog/proxy_error,filelog/proxy_access,]
+      exporters: [otlphttp/logs]
 `
 )
 

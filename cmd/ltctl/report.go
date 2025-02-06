@@ -76,7 +76,7 @@ func RunGenerateReportCmdF(cmd *cobra.Command, args []string) error {
 	}
 
 	if promURL == "" {
-		fmt.Printf("Flag --prometheus-url is not set. Defaulting to the deployment's Prometheus server...")
+		fmt.Println("Flag --prometheus-url is not set. Defaulting to the deployment's Prometheus server...")
 		config, err := getConfig(cmd)
 		if err != nil {
 			return err
@@ -90,7 +90,12 @@ func RunGenerateReportCmdF(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("could not parse output: %w", err)
 		}
-		promURL = "http://" + output.MetricsServer.PrivateIP + ":9090"
+
+		if !output.HasMetrics() {
+			return fmt.Errorf("no active deployment found, use the `--prometheus-url` flag if you have a local or manually deployed Prometheus server running")
+		}
+
+		promURL = "http://" + output.MetricsServer.GetConnectionIP() + ":9090"
 	}
 
 	helper, err := prometheus.NewHelper(promURL)

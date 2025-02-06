@@ -21,6 +21,7 @@ type output struct {
 			Endpoint          string `json:"endpoint"`
 			ClusterIdentifier string `json:"cluster_identifier"`
 			Writer            bool   `json:"writer"`
+			DBIdentifier      string `json:"identifier"`
 		} `json:"value"`
 	} `json:"dbCluster"`
 	Agents struct {
@@ -86,11 +87,38 @@ type Output struct {
 
 // Instance is an AWS EC2 instance resource.
 type Instance struct {
-	PrivateIP  string `json:"private_ip"`
-	PublicIP   string `json:"public_ip"`
-	PublicDNS  string `json:"public_dns"`
-	PrivateDNS string `json:"private_dns"`
-	Tags       Tags   `json:"tags"`
+	PrivateIP      string `json:"private_ip"`
+	PublicIP       string `json:"public_ip"`
+	PublicDNS      string `json:"public_dns"`
+	PrivateDNS     string `json:"private_dns"`
+	Tags           Tags   `json:"tags"`
+	connectionType string
+}
+
+func (i *Instance) SetConnectionType(connType string) {
+	// Default to public if not set or unknown
+	if connType != "private" && connType != "public" {
+		connType = "public"
+	}
+	i.connectionType = connType
+}
+
+func (i Instance) GetConnectionType() string {
+	return i.connectionType
+}
+
+func (i Instance) GetConnectionIP() string {
+	if i.GetConnectionType() == "private" {
+		return i.PrivateIP
+	}
+	return i.PublicIP
+}
+
+func (i Instance) GetConnectionDNS() string {
+	if i.GetConnectionType() == "private" {
+		return i.PrivateDNS
+	}
+	return i.PublicDNS
 }
 
 // ElasticSearchDomain is an AWS Elasticsearch domain.
@@ -112,8 +140,9 @@ type Tags struct {
 
 // DBInstance defines an RDS instance resource.
 type DBInstance struct {
-	Endpoint string
-	IsWriter bool
+	DBIdentifier string
+	Endpoint     string
+	IsWriter     bool
 }
 
 // DBCluster defines a RDS cluster instance resource.
@@ -166,17 +195,35 @@ func (t *Terraform) loadOutput() error {
 		outputv2.Proxies = append(outputv2.Proxies, o.Proxy.Value...)
 	}
 
+	if t.config != nil {
+		// Set connection type for all instances
+		for i := range outputv2.Instances {
+			outputv2.Instances[i].SetConnectionType(t.config.ConnectionType)
+		}
+		for i := range outputv2.Agents {
+			outputv2.Agents[i].SetConnectionType(t.config.ConnectionType)
+		}
+		for i := range outputv2.JobServers {
+			outputv2.JobServers[i].SetConnectionType(t.config.ConnectionType)
+		}
+		for i := range outputv2.Proxies {
+			outputv2.Proxies[i].SetConnectionType(t.config.ConnectionType)
+		}
+	}
+
 	if len(o.DBCluster.Value) > 0 {
 		for _, inst := range o.DBCluster.Value {
 			outputv2.DBCluster.Instances = append(outputv2.DBCluster.Instances, DBInstance{
-				Endpoint: inst.Endpoint,
-				IsWriter: inst.Writer,
+				DBIdentifier: inst.DBIdentifier,
+				Endpoint:     inst.Endpoint,
+				IsWriter:     inst.Writer,
 			})
 		}
 		outputv2.DBCluster.ClusterIdentifier = o.DBCluster.Value[0].ClusterIdentifier
 	}
 	if len(o.MetricsServer.Value) > 0 {
 		outputv2.MetricsServer = o.MetricsServer.Value[0]
+		outputv2.MetricsServer.SetConnectionType(t.config.ConnectionType)
 	}
 	if len(o.ElasticServer.Value) > 0 {
 		outputv2.ElasticSearchServer = o.ElasticServer.Value[0]
@@ -192,6 +239,7 @@ func (t *Terraform) loadOutput() error {
 	}
 	if len(o.KeycloakServer.Value) > 0 {
 		outputv2.KeycloakServer = o.KeycloakServer.Value[0]
+		outputv2.KeycloakServer.SetConnectionType(t.config.ConnectionType)
 	}
 	if len(o.KeycloakDatabaseCluster.Value) > 0 {
 		for _, inst := range o.KeycloakDatabaseCluster.Value {
@@ -267,7 +315,7 @@ func (o *Output) HasAgents() bool {
 
 // HasMetrics returns whether a deployment includes the metrics instance.
 func (o *Output) HasMetrics() bool {
-	return o.MetricsServer.PrivateIP != ""
+	return o.MetricsServer.GetConnectionIP() != ""
 }
 
 // HasS3Bucket returns whether a deployment includes the S3 Bucket.
@@ -287,7 +335,7 @@ func (o *Output) HasJobServer() bool {
 
 // HasKeycloak returns whether a deployment has Keycloak installed in it or not.
 func (o *Output) HasKeycloak() bool {
-	return o.KeycloakServer.PrivateIP != ""
+	return o.KeycloakServer.GetConnectionIP() != ""
 }
 
 // DBReaders returns the list of db reader endpoints.

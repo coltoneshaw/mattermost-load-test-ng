@@ -69,8 +69,15 @@ resource "aws_iam_role_policy_attachment" "es_attach" {
    }
 */
 resource "aws_cloudwatch_log_group" "es_log_group" {
-  count = var.es_instance_count > 0 ? 1 : 0
-  name  = "${var.cluster_name}-log-group"
+  count = var.es_enable_cloudwatch_logs ? 1 : 0
+  name = "${var.cluster_name}-log-group"
+}
+
+data "aws_subnets" "selected" {
+  filter {
+    name   = "vpc-id"
+    values = [var.cluster_vpc_id]
+  }
 }
 
 resource "aws_opensearch_domain" "es_server" {
@@ -83,12 +90,9 @@ resource "aws_opensearch_domain" "es_server" {
   engine_version = var.es_version
 
   vpc_options {
-    subnet_ids = [
-      element(tolist(data.aws_subnets.selected.ids), 0)
-    ]
+    subnet_ids         = (length(var.cluster_subnet_ids.elasticsearch) > 0) ? tolist(var.cluster_subnet_ids.elasticsearch) : [element(tolist(data.aws_subnets.selected.ids), 0)]
     security_group_ids = [aws_security_group.elastic[0].id]
   }
-
 
   ebs_options {
     ebs_enabled = true
@@ -97,8 +101,12 @@ resource "aws_opensearch_domain" "es_server" {
   }
 
   cluster_config {
-    instance_count = var.es_instance_count
-    instance_type  = var.es_instance_type
+    instance_count         = var.es_instance_count
+    instance_type          = var.es_instance_type
+    zone_awareness_enabled = var.es_zone_awareness_enabled
+    zone_awareness_config {
+      availability_zone_count = var.es_zone_awarness_availability_zone_count
+    }
   }
 
   access_policies = <<CONFIG
@@ -115,9 +123,19 @@ resource "aws_opensearch_domain" "es_server" {
   }
   CONFIG
 
-  log_publishing_options {
-    cloudwatch_log_group_arn = aws_cloudwatch_log_group.es_log_group[0].arn
-    log_type                 = "ES_APPLICATION_LOGS"
+  depends_on = [
+    aws_iam_service_linked_role.es,
+  ]
+
+  dynamic "log_publishing_options" {
+    for_each = var.es_enable_cloudwatch_logs ? [true] : []
+    content {
+      # Just using index 0 because the count is mainly used to control one or none.
+      # We don't have a need for multiple log groups.
+      # https://github.com/mattermost/mattermost-load-test-ng/pull/874#issuecomment-2544984861
+      cloudwatch_log_group_arn = aws_cloudwatch_log_group.es_log_group[0].arn
+      log_type                 = "ES_APPLICATION_LOGS"
+    }
   }
 
   advanced_security_options {

@@ -9,7 +9,7 @@ terraform {
 
 provider "aws" {
   region  = var.aws_region
-  profile = var.aws_profile
+  profile = var.aws_profile == "" ? null : var.aws_profile
   default_tags {
     tags = merge(
       {
@@ -33,13 +33,6 @@ locals {
   private_ip = data.external.private_ip.result.ip
 }
 
-data "aws_subnets" "selected" {
-  filter {
-    name   = "vpc-id"
-    values = [var.es_vpc]
-  }
-}
-
 resource "aws_key_pair" "key" {
   key_name   = "${var.cluster_name}-keypair"
   public_key = file(var.ssh_public_key)
@@ -54,15 +47,16 @@ resource "aws_instance" "app_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.private_ip
+    host = var.connection_type == "public" ? self.public_ip : self.private_ip
   }
 
-  ami                         = var.aws_ami
-  instance_type               = var.app_instance_type
-  key_name                    = aws_key_pair.key.id
-  count                       = var.app_instance_count
-  availability_zone           = var.aws_az
-  iam_instance_profile        = var.app_attach_iam_profile
+  ami                  = var.aws_ami
+  instance_type        = var.app_instance_type
+  key_name             = aws_key_pair.key.id
+  count                = var.app_instance_count
+  availability_zone    = var.aws_az
+  iam_instance_profile = var.app_attach_iam_profile
+  subnet_id            = (length(var.cluster_subnet_ids.app) > 0) ? element(tolist(var.cluster_subnet_ids.app), count.index) : null
 
   vpc_security_group_ids = [
     aws_security_group.app[0].id,
@@ -150,7 +144,7 @@ resource "aws_instance" "metrics_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.private_ip
+    host = var.connection_type == "public" ? self.public_ip : self.private_ip
   }
 
   ami               = var.aws_ami
@@ -158,8 +152,7 @@ resource "aws_instance" "metrics_server" {
   count             = 1
   key_name          = aws_key_pair.key.id
   availability_zone = var.aws_az
-  subnet_id         = var.cluster_subnet_id
-  associate_public_ip_address = false
+  subnet_id         = (length(var.cluster_subnet_ids.metrics) > 0) ? element(tolist(var.cluster_subnet_ids.metrics), count.index) : null
 
   vpc_security_group_ids = [
     aws_security_group.metrics[0].id,
@@ -185,8 +178,9 @@ resource "aws_instance" "proxy_server" {
   ami                         = var.aws_ami
   instance_type               = var.proxy_instance_type
   count                       = var.proxy_instance_count
-  associate_public_ip_address = false
+  associate_public_ip_address = var.proxy_allocate_public_ip_address
   availability_zone           = var.aws_az
+  subnet_id                   = (length(var.cluster_subnet_ids.proxy) > 0) ? element(tolist(var.cluster_subnet_ids.proxy), count.index) : null
 
   vpc_security_group_ids = [
     aws_security_group.proxy[0].id
@@ -202,7 +196,7 @@ resource "aws_instance" "proxy_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.private_ip
+    host = var.connection_type == "public" ? self.public_ip : self.private_ip
   }
 
   provisioner "remote-exec" {
@@ -267,17 +261,39 @@ resource "aws_iam_user_policy" "s3userpolicy" {
 EOF
 }
 
+resource "aws_elasticache_subnet_group" "redis" {
+  name       = "${var.cluster_name}-redis-subnet-group"
+  subnet_ids = tolist(var.cluster_subnet_ids.redis)
+  count      = var.redis_enabled && length(var.cluster_subnet_ids.redis) > 1 ? 1 : 0
+
+  tags = {
+    Name = "${var.cluster_name}-redis-subnet-group-${count.index}"
+  }
+}
+
+
 resource "aws_elasticache_cluster" "redis_server" {
-  cluster_id                   = "${var.cluster_name}-redis"
-  engine                       = "redis"
-  node_type                    = var.redis_node_type
-  count                        = var.redis_enabled ? 1 : 0
-  num_cache_nodes              = 1
-  parameter_group_name         = var.redis_param_group_name
-  engine_version               = var.redis_engine_version
-  port                         = 6379
-  security_group_ids           = [aws_security_group.redis[0].id]
-  availability_zone            = var.aws_az
+  cluster_id           = "${var.cluster_name}-redis"
+  engine               = "redis"
+  node_type            = var.redis_node_type
+  count                = var.redis_enabled ? 1 : 0
+  num_cache_nodes      = 1
+  parameter_group_name = var.redis_param_group_name
+  engine_version       = var.redis_engine_version
+  port                 = 6379
+  security_group_ids   = [aws_security_group.redis[0].id]
+  availability_zone    = var.aws_az
+  subnet_group_name    = var.redis_enabled && length(var.cluster_subnet_ids.redis) > 1 ? aws_elasticache_subnet_group.redis[0].name : ""
+}
+
+resource "aws_db_subnet_group" "db" {
+  name       = "${var.cluster_name}-db-subnet-group"
+  subnet_ids = tolist(var.cluster_subnet_ids.database)
+  count      = var.db_instance_count > 0 && length(var.cluster_subnet_ids.database) > 1 ? 1 : 0
+
+  tags = {
+    Name = "${var.cluster_name}-db-subnet-group-${count.index}"
+  }
 }
 
 resource "aws_rds_cluster" "db_cluster" {
@@ -285,16 +301,16 @@ resource "aws_rds_cluster" "db_cluster" {
     Name = "${var.cluster_name}-db-cluster"
   }
 
-  count               = var.app_instance_count > 0 && var.db_instance_count > 0 && var.db_cluster_identifier == "" ? 1 : 0
-  cluster_identifier  = var.db_cluster_identifier != "" ? "" : "${var.cluster_name}-db"
-  database_name       = "${var.cluster_name}db"
-  master_username     = var.db_username
-  master_password     = var.db_password
-  skip_final_snapshot = true
-  apply_immediately   = true
-  engine              = var.db_instance_engine
-  engine_version      = var.db_engine_version[var.db_instance_engine]
-
+  count                  = var.app_instance_count > 0 && var.db_instance_count > 0 && var.db_cluster_identifier == "" ? 1 : 0
+  cluster_identifier     = var.db_cluster_identifier != "" ? "" : "${var.cluster_name}-db"
+  database_name          = "${var.cluster_name}db"
+  master_username        = var.db_username
+  master_password        = var.db_password
+  skip_final_snapshot    = true
+  apply_immediately      = true
+  engine                 = var.db_instance_engine
+  engine_version         = var.db_engine_version[var.db_instance_engine]
+  db_subnet_group_name   = var.app_instance_count > 0 && var.db_instance_count > 0 && length(var.cluster_subnet_ids.database) > 1 ? aws_db_subnet_group.db[0].name : ""
   vpc_security_group_ids = [aws_security_group.db[0].id]
 }
 
@@ -311,13 +327,14 @@ resource "aws_rds_cluster_instance" "cluster_instances" {
   apply_immediately            = true
   auto_minor_version_upgrade   = false
   performance_insights_enabled = var.db_enable_performance_insights
-  db_parameter_group_name      = length(var.db_parameters) > 0 ? "${var.cluster_name}-db-pg" : ""
+  db_parameter_group_name      = length(var.db_parameters) > 0 ? aws_db_parameter_group.db_params_group.name : ""
   availability_zone            = var.aws_az
+  db_subnet_group_name         = var.app_instance_count > 0 && var.db_instance_count > 0 && length(var.cluster_subnet_ids.database) > 1 ? aws_db_subnet_group.db[0].name : ""
 }
 
 resource "aws_db_parameter_group" "db_params_group" {
-  name   = "${var.cluster_name}-db-pg"
-  family = var.db_instance_engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql14"
+  name_prefix = "${var.cluster_name}-db-pg"
+  family      = var.db_instance_engine == "aurora-mysql" ? "aurora-mysql8.0" : "aurora-postgresql14"
   dynamic "parameter" {
     for_each = var.db_parameters
     content {
@@ -325,6 +342,10 @@ resource "aws_db_parameter_group" "db_params_group" {
       value        = parameter.value["value"]
       apply_method = parameter.value["apply_method"]
     }
+  }
+
+  lifecycle {
+    create_before_destroy = true
   }
 }
 
@@ -336,15 +357,16 @@ resource "aws_instance" "loadtest_agent" {
   connection {
     type = "ssh"
     user = "ubuntu"
-    host = self.private_ip
+    host = var.connection_type == "public" ? self.public_ip : self.private_ip
   }
 
-  ami                         = var.aws_ami
-  instance_type               = var.agent_instance_type
-  key_name                    = aws_key_pair.key.id
-  count                       = var.agent_instance_count
-  subnet_id                   = var.cluster_subnet_id
-  associate_public_ip_address = false
+  ami           = var.aws_ami
+  instance_type = var.agent_instance_type
+  key_name      = aws_key_pair.key.id
+  count         = var.agent_instance_count
+  subnet_id     = (length(var.cluster_subnet_ids.agent) > 0) ? element(tolist(var.cluster_subnet_ids.agent), count.index) : null
+
+  associate_public_ip_address = var.agent_allocate_public_ip_address
   availability_zone           = var.aws_az
 
   vpc_security_group_ids = [aws_security_group.agent.id]
@@ -363,6 +385,7 @@ resource "aws_security_group" "app" {
   count       = var.app_instance_count > 0 ? 1 : 0
   name        = "${var.cluster_name}-app-security-group"
   description = "App security group for loadtest cluster ${var.cluster_name}"
+  vpc_id      = var.cluster_vpc_id
 
   ingress {
     from_port   = 22
@@ -409,6 +432,7 @@ resource "aws_security_group" "app_gossip" {
   count       = var.app_instance_count > 0 ? 1 : 0
   name        = "${var.cluster_name}-app-security-group-gossip"
   description = "App security group for gossip loadtest cluster ${var.cluster_name}"
+  vpc_id      = var.cluster_vpc_id
 
   ingress {
     from_port       = 8074
@@ -444,8 +468,9 @@ resource "aws_security_group" "app_gossip" {
 
 
 resource "aws_security_group" "db" {
-  count = var.app_instance_count > 0 ? 1 : 0
-  name  = "${var.cluster_name}-db-security-group"
+  count  = var.app_instance_count > 0 ? 1 : 0
+  name   = "${var.cluster_name}-db-security-group"
+  vpc_id = var.cluster_vpc_id
 
   ingress {
     from_port       = 3306
@@ -516,9 +541,9 @@ resource "aws_security_group_rule" "agent-node-exporter" {
 }
 
 resource "aws_security_group" "metrics" {
-  count = 1
-  name  = "${var.cluster_name}-metrics-security-group"
-  vpc_id      = var.cluster_vpc_id
+  count  = 1
+  name   = "${var.cluster_name}-metrics-security-group"
+  vpc_id = var.cluster_vpc_id
 }
 
 resource "aws_security_group_rule" "metrics-ssh" {
@@ -595,6 +620,7 @@ resource "aws_security_group_rule" "metrics-egress" {
 resource "aws_security_group" "redis" {
   name        = "${var.cluster_name}-redis-security-group"
   description = "Security group for redis instance"
+  vpc_id      = var.cluster_vpc_id
 
   ingress {
     from_port       = 6379
@@ -609,6 +635,7 @@ resource "aws_security_group" "redis" {
 resource "aws_security_group" "elastic" {
   name        = "${var.cluster_name}-elastic-security-group"
   description = "Security group for elastic instance"
+  vpc_id      = var.cluster_vpc_id
 
   ingress {
     from_port       = 443
@@ -636,6 +663,7 @@ resource "aws_security_group" "proxy" {
   count       = var.proxy_instance_count > 0 ? 1 : 0
   name        = "${var.cluster_name}-proxy-security-group"
   description = "Proxy security group for loadtest cluster ${var.cluster_name}"
+  vpc_id      = var.cluster_vpc_id
 
   ingress {
     from_port   = 80
@@ -675,14 +703,15 @@ resource "aws_instance" "job_server" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.private_ip
+    host = var.connection_type == "public" ? self.public_ip : self.private_ip
   }
 
-  ami                         = var.aws_ami
-  instance_type               = var.job_server_instance_type
-  key_name                    = aws_key_pair.key.id
-  count                       = var.job_server_instance_count
-  availability_zone           = var.aws_az
+  ami               = var.aws_ami
+  instance_type     = var.job_server_instance_type
+  key_name          = aws_key_pair.key.id
+  count             = var.job_server_instance_count
+  availability_zone = var.aws_az
+  subnet_id         = (length(var.cluster_subnet_ids.job) > 0) ? element(tolist(var.cluster_subnet_ids.job), count.index) : null
 
   vpc_security_group_ids = [
     aws_security_group.app[0].id,
@@ -703,11 +732,15 @@ resource "aws_instance" "job_server" {
   }
 }
 
+locals {
+  profile_flag = var.aws_profile == "" ? "" : "--profile ${var.aws_profile}"
+}
+
 resource "null_resource" "s3_dump" {
   count = (var.app_instance_count > 1 && var.s3_bucket_dump_uri != "" && var.s3_external_bucket_name == "") ? 1 : 0
 
   provisioner "local-exec" {
-    command = "aws --profile ${var.aws_profile} s3 cp ${var.s3_bucket_dump_uri} s3://${aws_s3_bucket.s3bucket[0].id} --recursive"
+    command = "aws ${local.profile_flag} s3 cp ${var.s3_bucket_dump_uri} s3://${aws_s3_bucket.s3bucket[0].id} --recursive"
   }
 }
 
@@ -721,14 +754,15 @@ resource "aws_instance" "keycloak" {
     # The default username for our AMI
     type = "ssh"
     user = "ubuntu"
-    host = self.private_ip
+    host = var.connection_type == "public" ? self.public_ip : self.private_ip
   }
 
-  ami                         = var.aws_ami
-  instance_type               = var.keycloak_instance_type
-  count                       = var.keycloak_enabled ? 1 : 0
-  key_name                    = aws_key_pair.key.id
-  availability_zone           = var.aws_az
+  ami               = var.aws_ami
+  instance_type     = var.keycloak_instance_type
+  count             = var.keycloak_enabled ? 1 : 0
+  key_name          = aws_key_pair.key.id
+  availability_zone = var.aws_az
+  subnet_id         = (length(var.cluster_subnet_ids.keycloak) > 0) ? element(tolist(var.cluster_subnet_ids.keycloak), count.index) : null
 
   vpc_security_group_ids = [
     aws_security_group.keycloak[0].id,
@@ -756,6 +790,7 @@ resource "aws_security_group" "keycloak" {
   count       = var.keycloak_enabled ? 1 : 0
   name        = "${var.cluster_name}-keycloak-security-group"
   description = "KeyCloak security group for loadtest cluster ${var.cluster_name}"
+  vpc_id      = var.cluster_vpc_id
 
   egress {
     from_port   = 0

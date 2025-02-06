@@ -5,6 +5,7 @@ package terraform
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/mattermost/mattermost-load-test-ng/deployment"
 	"github.com/mattermost/mattermost-load-test-ng/deployment/terraform/ssh"
 
@@ -95,35 +98,40 @@ func (t *Terraform) makeCmdForResource(resource string) (*exec.Cmd, error) {
 	// first agent.
 	for i, agent := range output.Agents {
 		if resource == agent.Tags.Name || (i == 0 && resource == "coordinator") {
-			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", agent.PrivateIP)), nil
+			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", agent.GetConnectionIP())), nil
 		}
 	}
 
 	// Match against the instance names.
 	for _, instance := range output.Instances {
 		if resource == instance.Tags.Name {
-			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", instance.PrivateIP)), nil
+			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", instance.GetConnectionIP())), nil
 		}
 	}
 
 	// Match against the job server names.
 	for _, instance := range output.JobServers {
 		if resource == instance.Tags.Name {
-			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", instance.PrivateIP)), nil
+			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", instance.GetConnectionIP())), nil
 		}
 	}
 
 	// Match against proxy names
 	for _, inst := range output.Proxies {
 		if resource == inst.Tags.Name {
-			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", inst.PrivateIP)), nil
+			return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", inst.GetConnectionIP())), nil
 		}
+	}
+
+	// Match against the keycloak server
+	if output.KeycloakServer.Tags.Name == resource {
+		return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", output.KeycloakServer.GetConnectionIP())), nil
 	}
 
 	// Match against the metrics servers, as well as convenient aliases.
 	switch resource {
 	case "metrics", "prometheus", "grafana", output.MetricsServer.Tags.Name:
-		return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", output.MetricsServer.PrivateIP)), nil
+		return exec.Command("ssh", fmt.Sprintf("ubuntu@%s", output.MetricsServer.GetConnectionIP())), nil
 	}
 
 	return nil, fmt.Errorf("could not find any resource with name %q", resource)
@@ -138,15 +146,15 @@ func (t *Terraform) OpenBrowserFor(resource string) error {
 	url := "http://"
 	switch resource {
 	case "grafana":
-		url += output.MetricsServer.PrivateDNS + ":3000"
+		url += output.MetricsServer.GetConnectionDNS() + ":3000"
 	case "mattermost":
 		if output.HasProxy() {
-			url += output.Proxies[0].PrivateDNS
+			url += output.Proxies[0].GetConnectionDNS()
 		} else {
-			url += output.Instances[0].PrivateDNS + ":8065"
+			url += output.Instances[0].GetConnectionDNS() + ":8065"
 		}
 	case "prometheus":
-		url += output.MetricsServer.PrivateDNS + ":9090"
+		url += output.MetricsServer.GetConnectionDNS() + ":9090"
 	default:
 		return fmt.Errorf("undefined resource :%q", resource)
 	}
@@ -174,7 +182,27 @@ func validateLicense(filename string) error {
 
 	validator := &utils.LicenseValidatorImpl{}
 	licenseStr, err := validator.ValidateLicense(data)
+	// If we cannot validate the license, we can test using another service
+	// environment to inform the user whether that's a possible solution
 	if err != nil {
+		currentValue := os.Getenv("MM_SERVICEENVIRONMENT")
+		defer func() { os.Setenv("MM_SERVICEENVIRONMENT", currentValue) }()
+
+		// Pick a different environment
+		newValue := model.ServiceEnvironmentTest
+		if currentValue != model.ServiceEnvironmentProduction {
+			newValue = model.ServiceEnvironmentProduction
+		}
+		os.Setenv("MM_SERVICEENVIRONMENT", newValue)
+
+		// If the error is not nil, then the user just needs to set the
+		// -service_environment flag to a different value
+		if _, newEnvErr := validator.ValidateLicense(data); newEnvErr == nil {
+			return fmt.Errorf("this license is valid only with a %q service environment, which is currently set to %q; try adding the -service_environment=%s flag to change it", newValue, currentValue, newValue)
+		}
+
+		// If not, we just return the (probably not very useful) error returned
+		// by the validator
 		return fmt.Errorf("failed to validate license: %w", err)
 	}
 
@@ -225,20 +253,25 @@ func (t *Terraform) getParams() []string {
 		"-var", fmt.Sprintf("aws_ami=%s", t.config.AWSAMI),
 		"-var", fmt.Sprintf("cluster_name=%s", t.config.ClusterName),
 		"-var", fmt.Sprintf("cluster_vpc_id=%s", t.config.ClusterVpcID),
-		"-var", fmt.Sprintf("cluster_subnet_id=%s", t.config.ClusterSubnetID),
+		"-var", fmt.Sprintf(`cluster_subnet_ids=%s`, t.config.ClusterSubnetIDs),
+		"-var", fmt.Sprintf("connection_type=%s", t.config.ConnectionType),
 		"-var", fmt.Sprintf("app_instance_count=%d", t.config.AppInstanceCount),
 		"-var", fmt.Sprintf("app_instance_type=%s", t.config.AppInstanceType),
 		"-var", fmt.Sprintf("app_attach_iam_profile=%s", t.config.AppAttachIAMProfile),
 		"-var", fmt.Sprintf("agent_instance_count=%d", t.config.AgentInstanceCount),
 		"-var", fmt.Sprintf("agent_instance_type=%s", t.config.AgentInstanceType),
+		"-var", fmt.Sprintf("agent_allocate_public_ip_address=%t", t.config.AgentAllocatePublicIPAddress),
 		"-var", fmt.Sprintf("es_instance_count=%d", t.config.ElasticSearchSettings.InstanceCount),
 		"-var", fmt.Sprintf("es_instance_type=%s", t.config.ElasticSearchSettings.InstanceType),
 		"-var", fmt.Sprintf("es_version=%s", t.config.ElasticSearchSettings.Version),
-		"-var", fmt.Sprintf("es_vpc=%s", t.config.ElasticSearchSettings.VpcID),
 		"-var", fmt.Sprintf("es_create_role=%t", t.config.ElasticSearchSettings.CreateRole),
 		"-var", fmt.Sprintf("es_snapshot_repository=%s", t.config.ElasticSearchSettings.SnapshotRepository),
+		"-var", fmt.Sprintf("es_zone_awareness_enabled=%t", t.config.ElasticSearchSettings.ZoneAwarenessEnabled),
+		"-var", fmt.Sprintf("es_zone_awarness_availability_zone_count=%d", t.config.ElasticSearchSettings.ZoneAwarenessAZCount),
+		"-var", fmt.Sprintf("es_enable_cloudwatch_logs=%t", t.config.ElasticSearchSettings.EnableCloudwatchLogs),
 		"-var", fmt.Sprintf("proxy_instance_count=%d", t.config.ProxyInstanceCount),
 		"-var", fmt.Sprintf("proxy_instance_type=%s", t.config.ProxyInstanceType),
+		"-var", fmt.Sprintf("proxy_allocate_public_ip_address=%t", t.config.ProxyAllocatePublicIPAddress),
 		"-var", fmt.Sprintf("ssh_public_key=%s", t.config.SSHPublicKey),
 		"-var", fmt.Sprintf("db_instance_count=%d", t.config.TerraformDBSettings.InstanceCount),
 		"-var", fmt.Sprintf("db_instance_engine=%s", t.config.TerraformDBSettings.InstanceEngine),
@@ -299,7 +332,7 @@ func getServerURL(output *Output, deploymentConfig *deployment.Config) string {
 		return deploymentConfig.ServerURL
 	}
 
-	url := output.Instances[0].PrivateIP
+	url := output.Instances[0].GetConnectionIP()
 	if deploymentConfig.SiteURL != "" {
 		url = deploymentConfig.SiteURL
 	}
@@ -313,4 +346,31 @@ func getServerURL(output *Output, deploymentConfig *deployment.Config) string {
 	}
 
 	return url
+}
+
+// GetAWSConfig returns the AWS config, using the profile configured in the
+// deployer if present, and defaulting to the default credential chain otherwise
+func (t *Terraform) GetAWSConfig() (aws.Config, error) {
+	regionOpt := awsconfig.WithRegion(t.config.AWSRegion)
+
+	if t.config.AWSProfile == "" {
+		return awsconfig.LoadDefaultConfig(
+			context.Background(),
+			regionOpt,
+		)
+	}
+
+	profileOpt := awsconfig.WithSharedConfigProfile(t.config.AWSProfile)
+	return awsconfig.LoadDefaultConfig(context.Background(), profileOpt, regionOpt)
+}
+
+// GetAWSCreds returns the AWS config, using the profile configured in the
+// deployer if present, and defaulting to the default credential chain otherwise
+func (t *Terraform) GetAWSCreds() (aws.Credentials, error) {
+	cfg, err := t.GetAWSConfig()
+	if err != nil {
+		return aws.Credentials{}, err
+	}
+
+	return cfg.Credentials.Retrieve(context.Background())
 }

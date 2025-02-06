@@ -25,7 +25,6 @@ AWS Availability Zone in which to deploy instances. See the [AWS docs](https://d
 
 AWS AMI to use for the deployment. This is the image used for all EC2 instances created by the loadtest tool. See the [AWS AMI](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/AMIs.html) docs for more information. We suggest Ubuntu 20.04 or 22.04. Note, the AMI could change between AWS Regions.
 
-
 ## ClusterName
 
 *string*
@@ -51,6 +50,16 @@ The ID of the subnet associated to the resources.
 **Note**
 
 This setting only affects load-test agent instances. It is meant for pre-deployed environments.
+
+## ConnectionType
+
+*string*
+
+Defines how instances should be accessed. Can be either `public` (default) or `private`. 
+
+This defines how the deployer connects to the servers and the connection IPs exposed to the user of the load-test tool in the different CLI utilities:
+- When set to `private` the deployer will connect to the servers using their private IP addresses, which means the **user must be connected to the same network as the servers via jump host/VPN**.
+- If set to `public` the deployer will connect using public IP addresses, which means the user must have access to the internet and **the servers must be on a VPC and subnet with internet access**.
 
 ## AppInstanceCount
 
@@ -84,6 +93,69 @@ The number of load-test agent instances. The first instance will also host the [
 
 The type of the EC2 instance of the loadtest agent. See type [here](https://aws.amazon.com/ec2/instance-types/).
 
+## AgentAllocatePublicIPAddress
+
+*bool*
+
+Whether to allocate a public IP address to the agent instances.
+
+## ClusterSubnetIDs
+
+### App
+
+*[]string*
+
+The list of IDs of the subnets associated to the application server.
+
+### Job
+
+*[]string*
+
+The list of IDs of the subnets associated to the job server.
+
+### Proxy
+
+*[]string*
+
+The list of IDs of the subnets associated to the proxy server.
+
+### Agent
+
+*[]string*
+
+The list of IDs of the subnets associated to the load-test agent.
+
+### ElasticSearch
+
+*[]string*
+
+The list of IDs of the subnets associated to the Elasticsearch instances. If setting more than one you need to also set the `ElasticSearchSetting.ZoneAwarenessEnabled` and `ElasticSearchSetting.ZoneAwarenessAZCount` settings.
+
+### Metrics
+
+*[]string*
+
+The ID of the subnet associated to the metrics server.
+
+## Keycloak
+
+*[]string*
+
+The list of IDs of the subnets associated to the Keycloak server.
+
+## Database
+
+*[]string*
+
+The list of IDs of the subnets associated to the database instances.
+
+## Redis
+
+*[]string*
+
+The list of IDs of the subnets associated to the Redis instances.
+
+
 ## ElasticSearchSettings
 
 ### InstanceCount
@@ -103,14 +175,6 @@ The type of instance for the Elasticsearch service. Only AWS OpenSearch instance
 *string*
 
 Version of Elasticsearch to be deployed. Deployments only support AWS OpenSearch versions compatible with ElasticSearch, up to and including ElasticSearch v7.10.0; i.e., the ones prefixed by `Elasticsearch_.`. Check [AWS documentation](https://aws.amazon.com/opensearch-service/faqs/) to learn more about the versions and the [`aws` Terraform provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/opensearch_domain#engine_version) to learn more about the specific string used.
-
-## VpcID
-
-*string*
-
-Id for the VPC that is going to be associated with the Elasticsearch created instance. You can get the VPC Id [here](https://console.aws.amazon.com/vpc/).
-
-This ID is mandatory is you're going to instantiate an ES service in your cluster.
 
 ### CreateRole
 
@@ -146,6 +210,30 @@ The maximum time, in minutes, that the system will wait for the Elasticsearch sn
 
 The maximum time, in minutes, that the system will wait for the Elasticsearch cluster status to get green after having restored the snapshot. Defaults to 45 minutes.
 
+### ZoneAwarenessEnabled
+
+*bool*
+
+Whether to enable zone awareness for the Elasticsearch cluster. If set to `true`, you need to set the `ZoneAwarenessAZCount` setting.
+
+Check the [documentation](https://aws.amazon.com/blogs/big-data/increase-availability-for-amazon-opensearch-service-by-deploying-in-three-availability-zones/).
+
+### ZoneAwarenessAZCount
+
+*int*
+
+The number of availability zones to use for the Elasticsearch cluster. This setting is only used when `ZoneAwarenessEnabled` is set to `true`.
+
+Check the [documentation](https://aws.amazon.com/blogs/big-data/increase-availability-for-amazon-opensearch-service-by-deploying-in-three-availability-zones/).
+
+### EnableCloudwatchLogs
+
+*bool* (Default: `true`)
+
+Whether to enable Cloudwatch logs for the Elasticsearch cluster.
+
+Check the [documentation](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/AnalyzingLogData.html).
+
 ## JobServerSettings
 
 ### InstanceCount
@@ -177,6 +265,12 @@ Number of proxy instances to run. Right now, only values `0` and `1` are allowed
 *string*
 
 The type of the EC2 instance of the proxy server. See type [here](https://aws.amazon.com/ec2/instance-types/).
+
+## ProxyAllocatePublicIPAddress
+
+*bool*
+
+Whether to allocate a public IP address to the proxy instances.
 
 ## SSHPublicKey
 
@@ -281,6 +375,12 @@ The list of dsn for external database read replicas
 
 The list of dsn for external database search replicas
 
+### ClusterIdentifier
+
+*string*
+
+ClusterIdentifier of the existing DB cluster.
+
 ## ExternalBucketSettings
 
 ### AmazonS3AccessKeyId
@@ -341,9 +441,10 @@ Whether to use SSE or not.
 
 *string*
 
-The URL from where to download Mattermost release. This can also point to a local binary path if the user wants to run a load-test on a custom server build.
-The path should be prefixed with `file://` and point to the binary of the server (e.g. `file:///home/user/go/src/github.com/mattermost/mattermost/server/bin/mattermost`).
-Only the binary gets replaced, and the rest of the build comes from the latest stable release.
+The URL from where to download the Mattermost release. `MattermostDownloadURL` supports the following use cases:
+1. If it is a URL, it should point to a `*.tar.gz` file containing an Enterprise build of the Mattermost release to use. You can use `https://latest.mattermost.com/mattermost-enterprise-linux` for getting the latest Mattermost release. If you want to test the changes from a PR, CI will generate such a file for you, under the URL https://pr-builds.mattermost.com/mattermost-platform/commit/$COMMIT_SHA/mattermost-enterprise-linux-amd64.tar.gz, where `$COMMIT_SHA` is the full SHA of the commit you want to test.
+2. If it is a `file://` URI pointing to a simple binary in your local filesystem, the deployer will use the latest Mattermost release and replace its binary with the binary pointed to by the `file://` URI. This means that the webapp, which comes from the latest Mattermost release, may not match the binary used. This is kept mainly for backward compatibility.
+3. If it is a `file://` pointing to a `*.tar.gz` file in your local filesystem, it will behave as if it was a URL: the file is expected to contain an Enterprise build of the Mattermost release to use. This is useful for local changes that you want to test without opening a PR.
 
 ## MattermostLicenseFile
 
@@ -481,6 +582,10 @@ to be loaded before running the load-test.
 The file is expected to be gzip compressed.
 This can also point to a local file if prefixed with "file://".
 In such case, the dump file will be uploaded to the app servers.
+
+Loading a dump into a database only work for terraform created databases.
+If you are using an existing database by relying on [`ExternalDBSettings`](#ExternalDBSettings)
+you need to load the dump manually.
 
 ## SiteURL
 

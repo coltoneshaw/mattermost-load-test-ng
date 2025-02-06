@@ -1,6 +1,6 @@
 module github.com/mattermost/mattermost-load-test-ng
 
-go 1.22
+go 1.22.0
 
 toolchain go1.22.8
 
@@ -24,16 +24,17 @@ require (
 
 require (
 	github.com/Nerzal/gocloak/v13 v13.9.0
-	github.com/aws/aws-sdk-go-v2 v1.31.0
+	github.com/aws/aws-sdk-go-v2 v1.32.5
 	github.com/aws/aws-sdk-go-v2/config v1.27.27
 	github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.37.3
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.173.0
+	github.com/aws/aws-sdk-go-v2/service/rds v1.91.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.63.3
 	github.com/gliderlabs/ssh v0.1.1
 	github.com/grafana/alloy/syntax v0.1.0
 	github.com/graph-gophers/graphql-go v1.5.1-0.20230110080634-edea822f558a
-	github.com/mattermost/mattermost/server/public v0.1.7-0.20240806035841-540febd866aa
-	github.com/mattermost/mattermost/server/v8 v8.0.0-20240726090344-5547504c1d68
+	github.com/mattermost/mattermost/server/public v0.1.8-0.20241015185928-63c97f5a6d8f
+	github.com/mattermost/mattermost/server/v8 v8.0.0-20241015185928-63c97f5a6d8f
 	github.com/opensearch-project/opensearch-go/v4 v4.1.0
 	github.com/pelletier/go-toml/v2 v2.2.2
 	github.com/vmihailenco/msgpack/v5 v5.4.1
@@ -60,15 +61,15 @@ require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.5 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.27 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.11 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.18 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.18 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.3.24 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.6.24 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.11.5 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.11.20 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.12.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.22.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.26.4 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.30.3 // indirect
-	github.com/aws/smithy-go v1.21.0 // indirect
+	github.com/aws/smithy-go v1.22.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -94,6 +95,7 @@ require (
 	github.com/hashicorp/yamux v0.1.1 // indirect
 	github.com/imkira/go-interpol v1.1.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/jmoiron/sqlx v1.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/kennygrant/sanitize v1.2.4 // indirect
@@ -141,7 +143,7 @@ require (
 	github.com/yudai/pp v2.0.1+incompatible // indirect
 	github.com/yuin/goldmark v1.7.4 // indirect
 	golang.org/x/net v0.27.0 // indirect
-	golang.org/x/sys v0.22.0 // indirect
+	golang.org/x/sys v0.24.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240725223205-93522f1f2a9f // indirect

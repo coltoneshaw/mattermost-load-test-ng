@@ -7,12 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/mattermost/mattermost-load-test-ng/coordinator"
@@ -179,7 +177,7 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 		return err
 	}
 
-	agentClient, err := extAgent.NewClient(tfOutput.Agents[0].PrivateIP)
+	agentClient, err := extAgent.NewClient(tfOutput.Agents[0].GetConnectionIP())
 	if err != nil {
 		return fmt.Errorf("error in getting ssh connection %w", err)
 	}
@@ -187,7 +185,7 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 
 	appClients := make([]*ssh.Client, len(tfOutput.Instances))
 	for i, instance := range tfOutput.Instances {
-		client, err := extAgent.NewClient(instance.PrivateIP)
+		client, err := extAgent.NewClient(instance.GetConnectionIP())
 		if err != nil {
 			return fmt.Errorf("error in getting ssh connection %w", err)
 		}
@@ -201,7 +199,7 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 		Clients: appClients,
 	}
 
-	buildFileName := filepath.Base(buildCfg.URL)
+	buildFileName := getBuildFilename(buildCfg)
 	installCmd := deployment.Cmd{
 		Msg:     "Installing app",
 		Value:   fmt.Sprintf("cd /home/ubuntu && tar xzf %s && cp /opt/mattermost/config/config.json . && sudo rm -rf /opt/mattermost && sudo mv mattermost /opt/ && mv config.json /opt/mattermost/config/", buildFileName),
@@ -246,7 +244,7 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 	initDataCmd := deployment.Cmd{
 		Msg: "Initializing data",
 		Value: fmt.Sprintf("cd mattermost-load-test-ng && ./bin/ltagent init --user-prefix '%s' --server-url 'http://%s:8065' > /dev/null 2>&1",
-			tfOutput.Agents[0].Tags.Name, tfOutput.Instances[0].PrivateIP),
+			tfOutput.Agents[0].Tags.Name, tfOutput.Instances[0].GetConnectionIP()),
 		Clients: []*ssh.Client{agentClient},
 	}
 
@@ -271,17 +269,7 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 	}
 	loadDBDumpCmd.Value = dbCmd
 
-	clearLicensesCmdValue, err := deployment.ClearLicensesCmd(dbInfo)
-	if err != nil {
-		return fmt.Errorf("error building command for clearing licenses data: %w", err)
-	}
-	clearLicensesCmd := deployment.Cmd{
-		Msg:     "Clearing old licenses data",
-		Clients: []*ssh.Client{appClients[0]},
-		Value:   clearLicensesCmdValue,
-	}
-
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithSharedConfigProfile(t.Config().AWSProfile))
+	cfg, err := t.GetAWSConfig()
 	if err != nil {
 		return fmt.Errorf("error loading aws config: %w", err)
 	}
@@ -291,7 +279,7 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 	if dumpFilename == "" {
 		cmds = append(cmds, startCmd, createAdminCmd, initDataCmd)
 	} else {
-		cmds = append(cmds, loadDBDumpCmd, clearLicensesCmd, startCmd)
+		cmds = append(cmds, loadDBDumpCmd, startCmd)
 	}
 
 	// Resetting the buckets can happen concurrently with the rest of the remote commands
@@ -327,6 +315,10 @@ func initLoadTest(t *terraform.Terraform, buildCfg BuildConfig, dumpFilename str
 				return fmt.Errorf("failed to run cmd %q: %w %s", c.Value, err, out)
 			}
 		}
+	}
+
+	if err := t.PostProcessDatabase(extAgent); err != nil {
+		return fmt.Errorf("failed to post-process database: %w", err)
 	}
 
 	// Make sure that the S3 bucket reset routine is finished and return its error, if any

@@ -3,6 +3,7 @@ AWSAMI = 'ami-003d3d03cfe1b0468'
 AWSProfile = 'mm-loadtest'
 AWSRegion = 'us-east-1'
 AWSAvailabilityZone = 'us-east-1c'
+ConnectionType = 'public'
 
 # Mattermost configuration
 AdminEmail = 'sysadmin@sample.mattermost.com'
@@ -19,6 +20,7 @@ EnableNetPeekMetrics = false
 AgentInstanceCount = 2
 AgentInstanceType = 'c5.xlarge'
 EnableAgentFullLogs = true
+AgentAllocatePublicIPAddress = true
 
 # App servers configuration
 AppInstanceCount = 1
@@ -30,27 +32,40 @@ MetricsInstanceType = 't3.xlarge'
 
 # Cluster configuration
 ClusterName = 'loadtest'
-ClusterSubnetID = ''
 ClusterVpcID = ''
 
 # Database configuration
 DBDumpURI = ''
 
 # Load test configuration
-LoadTestDownloadURL = 'https://github.com/mattermost/mattermost-load-test-ng/releases/download/v1.15-rc2/mattermost-load-test-ng-v1.15-rc2-linux-amd64.tar.gz'
+LoadTestDownloadURL = 'https://github.com/mattermost/mattermost-load-test-ng/releases/download/v1.24.0/mattermost-load-test-ng-v1.24.0-linux-amd64.tar.gz'
 SSHPublicKey = '~/.ssh/id_rsa.pub'
 TerraformStateDir = '/var/lib/mattermost-load-test-ng'
 
 # Proxy server configuration
 ProxyInstanceType = 'c5.xlarge'
 ProxyInstanceCount = 1
+ProxyAllocatePublicIPAddress = true
+
+[ClusterSubnetIDs]
+App = []
+Job = []
+Proxy = []
+Agent = []
+ElasticSearch = []
+Metrics = []
+Keycloak = []
+Database = []
+Redis = []
 
 [ElasticSearchSettings]
 CreateRole = false
 InstanceCount = 0
 InstanceType = 'r6g.large.search'
-Version = 'Elasticsearch_7.10'
-VpcID = ''
+Version = 'OpenSearch_2.7'
+ZoneAwarenessEnabled = false
+ZoneAwarenessAZCount = 2
+EnableCloudwatchLogs = true
 
 [ExternalBucketSettings]
 AmazonS3AccessKeyId = ''
@@ -68,6 +83,7 @@ DataSource = ''
 DataSourceReplicas = []
 DataSourceSearchReplicas = []
 DriverName = 'cockroach'
+ClusterIdentifier = ''
 
 [JobServerSettings]
 InstanceCount = 0
@@ -146,4 +162,3 @@ Password = 'mostest80098bigpass_'
 UserName = 'mmuser'
 
 [CustomTags]
-

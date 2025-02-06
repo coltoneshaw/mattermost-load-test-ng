@@ -4,14 +4,17 @@
 package deployment
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
 	"github.com/mattermost/mattermost-load-test-ng/defaults"
 	"github.com/mattermost/mattermost-load-test-ng/loadtest/report"
 	"github.com/mattermost/mattermost-load-test-ng/logger"
+	"github.com/mattermost/mattermost/server/public/shared/mlog"
 )
 
 var esDomainNameRe = regexp.MustCompile(`^[a-z][a-z0-9\-]{2,27}$`)
@@ -19,8 +22,8 @@ var esDomainNameRe = regexp.MustCompile(`^[a-z][a-z0-9\-]{2,27}$`)
 // Config contains the necessary data
 // to deploy and provision a load test environment.
 type Config struct {
-	// AWSProfile is the name of the AWS profile to use for all AWS commands
-	AWSProfile string `default:"mm-loadtest"`
+	// AWSProfile is the optional name of the AWS profile to use for all AWS commands
+	AWSProfile string `default:""`
 	// AWSRegion is the region used to deploy all resources.
 	AWSRegion string `default:"us-east-1"`
 	// AWSAvailabilityZone defines the Availability Zone
@@ -32,8 +35,10 @@ type Config struct {
 	ClusterName string `default:"loadtest" validate:"alpha"`
 	// ClusterVpcID is the id of the VPC associated to the resources.
 	ClusterVpcID string
-	// ClusterSubnetID is the id of the subnet associated to the resources.
-	ClusterSubnetID string
+	// ClusterSubnetIDs is the ids of the subnets associated to each resource type.
+	ClusterSubnetIDs ClusterSubnetIDs
+	// ConnectionType defines how instances should be accessed, either "public" or "private"
+	ConnectionType string `default:"public" validate:"oneof:{public,private}"`
 	// Number of application instances.
 	AppInstanceCount int `default:"1" validate:"range:[0,)"`
 	// Type of the EC2 instance for app.
@@ -48,10 +53,14 @@ type Config struct {
 	AgentInstanceType string `default:"c7i.xlarge" validate:"notempty"`
 	// Logs the command output (stdout & stderr) to home directory.
 	EnableAgentFullLogs bool `default:"true"`
+	// Should a pubic IP be allocated for the agent instance.
+	AgentAllocatePublicIPAddress bool `default:"true"`
 	// Number of proxy instances.
 	ProxyInstanceCount int `default:"1" validate:"range:[0,5]"`
 	// Type of the EC2 instance for proxy.
 	ProxyInstanceType string `default:"m4.xlarge" validate:"notempty"`
+	// Should a pubic IP be allocated for the proxy instance.
+	ProxyAllocatePublicIPAddress bool `default:"true"`
 	// Path to the SSH public key.
 	SSHPublicKey string `default:"~/.ssh/id_rsa.pub" validate:"notempty"`
 	// Terraform database connection and provision settings.
@@ -82,7 +91,7 @@ type Config struct {
 	// URL from where to download load-test-ng binaries and configuration files.
 	// The configuration files provided in the package will be overridden in
 	// the deployment process.
-	LoadTestDownloadURL   string `default:"https://github.com/mattermost/mattermost-load-test-ng/releases/download/v1.21.0/mattermost-load-test-ng-v1.21.0-linux-amd64.tar.gz" validate:"url"`
+	LoadTestDownloadURL   string `default:"https://github.com/mattermost/mattermost-load-test-ng/releases/download/v1.24.0/mattermost-load-test-ng-v1.24.0-linux-amd64.tar.gz" validate:"url"`
 	ElasticSearchSettings ElasticSearchSettings
 	RedisSettings         RedisSettings
 	JobServerSettings     JobServerSettings
@@ -90,7 +99,7 @@ type Config struct {
 	Report                report.Config
 	// Directory under which the .terraform directory and state files are managed.
 	// It will be created if it does not exist
-	TerraformStateDir string `default:"/var/lib/mattermost-load-test-ng" validate:"notempty"`
+	TerraformStateDir string `default:"./ltstate" validate:"notempty"`
 	// URI of an S3 bucket whose contents are copied to the bucket created in the deployment
 	S3BucketDumpURI string `default:"" validate:"s3uri"`
 	// An optional URI to a MM server database dump file
@@ -141,6 +150,50 @@ func (t TerraformMap) String() string {
 		pairs = append(pairs, fmt.Sprintf("%s = %q", key, value))
 	}
 	return "{" + strings.Join(pairs, ", ") + "}"
+}
+
+// ClusterSubnetIDs contains the subnet ids for the different types of instances.
+type ClusterSubnetIDs struct {
+	App           []string `default_size:"0" json:"app"`
+	Job           []string `default_size:"0" json:"job"`
+	Proxy         []string `default_size:"0" json:"proxy"`
+	Agent         []string `default_size:"0" json:"agent"`
+	ElasticSearch []string `default_size:"0" json:"elasticsearch"`
+	Metrics       []string `default_size:"0" json:"metrics"`
+	Keycloak      []string `default_size:"0" json:"keycloak"`
+	Database      []string `default_size:"0" json:"database"`
+	Redis         []string `default_size:"0" json:"redis"`
+}
+
+// IsAnySet returns true if any of the subnet ids are set.
+func (c *ClusterSubnetIDs) IsAnySet() bool {
+	value := reflect.ValueOf(*c)
+
+	for i := 0; i < value.NumField(); i++ {
+		field := value.Field(i)
+		// Skip fields that are not slices
+		if field.Kind() != reflect.Slice {
+			continue
+		}
+
+		if field.IsNil() || value.Field(i).Len() == 0 {
+			continue
+		}
+
+		return true
+	}
+
+	return false
+
+}
+
+func (c ClusterSubnetIDs) String() string {
+	b, err := json.Marshal(c)
+	if err != nil {
+		mlog.Error("Failed to marshal ClusterSubnetIDs", mlog.Err(err))
+		return "{}"
+	}
+	return string(b)
 }
 
 type StorageSizes struct {
@@ -203,13 +256,15 @@ type TerraformDBSettings struct {
 // and provisioned.
 type ExternalDBSettings struct {
 	// Mattermost database driver
-	DriverName string `default:"" validate:"oneof:{mysql, postgres, cockroach}"`
+	DriverName string `default:"postgres" validate:"oneof:{mysql, postgres, cockroach}"`
 	// DSN to connect to the database
 	DataSource string `default:""`
 	// DSN to connect to the database replicas
 	DataSourceReplicas []string `default:""`
 	// DSN to connect to the database search replicas
 	DataSourceSearchReplicas []string `default:""`
+	// ClusterIdentifier of the existing DB cluster.
+	ClusterIdentifier string `default:""`
 }
 
 // ExternalBucketSettings contains the necessary data
@@ -240,7 +295,7 @@ type ExternalAuthProviderSettings struct {
 	// KeycloakAdminUser is the username of the keycloak admin interface (admin on the master realm)
 	KeycloakAdminUser string `default:"mmuser" validate:"notempty"`
 	// KeycloakAdminPassword is the password of the keycloak admin interface (admin on the master realm)
-	KeycloakAdminPassword string `default:"mmpass" validate:"notempty"`
+	KeycloakAdminPassword string `default:"mmpass" validate:"alpha"`
 	// KeycloakRealmFilePath is the path to the realm file to be uploaded to the keycloak instance.
 	// If empty, a default realm file will be used.
 	KeycloakRealmFilePath string `default:""`
@@ -276,9 +331,7 @@ type ElasticSearchSettings struct {
 	// Elasticsearch instance type to be created.
 	InstanceType string
 	// Elasticsearch version to be deployed.
-	Version string `default:"Elasticsearch_7.10"`
-	// Id of the VPC associated with the instance to be created.
-	VpcID string
+	Version string `default:"OpenSearch_2.7"`
 	// Set to true if the AWSServiceRoleForAmazonElasticsearchService role should be created.
 	CreateRole bool
 	// SnapshotRepository is the name of the S3 bucket where the snapshot to restore lives.
@@ -289,6 +342,12 @@ type ElasticSearchSettings struct {
 	RestoreTimeoutMinutes int `default:"45" validate:"range:[0,)"`
 	// ClusterTimeoutMinutes is the maximum time, in minutes, that the system will wait for the cluster status to get green.
 	ClusterTimeoutMinutes int `default:"45" validate:"range:[0,)"`
+	// ZoneAwarenessEnabled indicates whether to enable zone awareness or not.
+	ZoneAwarenessEnabled bool `default:"false"`
+	// ZoneAwarenessAZCount indicates the number of availability zones to use for zone awareness.
+	ZoneAwarenessAZCount int `default:"2" validate:"range:[1,3]"`
+	// EnableCloudwatchLogs indicates whether to enable Cloudwatch logs or not.
+	EnableCloudwatchLogs bool `default:"true"`
 }
 
 type RedisSettings struct {
@@ -339,12 +398,20 @@ func (p DBParameters) String() string {
 
 // IsValid reports whether a given deployment config is valid or not.
 func (c *Config) IsValid() error {
+	if c.ClusterSubnetIDs.IsAnySet() && c.ClusterVpcID == "" {
+		return errors.New("vpc_id is required when any subnet is specified")
+	}
+
 	if !checkPrefix(c.MattermostDownloadURL) {
 		return fmt.Errorf("mattermost download url is not in correct format: %q", c.MattermostDownloadURL)
 	}
 
 	if !checkPrefix(c.LoadTestDownloadURL) {
 		return fmt.Errorf("load-test download url is not in correct format: %q", c.LoadTestDownloadURL)
+	}
+
+	if c.ExternalDBSettings.DataSource != "" && c.DBDumpURI != "" {
+		return fmt.Errorf("both ExternalDBSettings.DataSource and DBDumpURI are set, only one can be set")
 	}
 
 	if err := c.validateElasticSearchConfig(); err != nil {
@@ -392,8 +459,8 @@ func (c *Config) validateElasticSearchConfig() error {
 	}
 
 	if (c.ElasticSearchSettings != ElasticSearchSettings{}) {
-		if c.ElasticSearchSettings.VpcID == "" {
-			return errors.New("VpcID must be set in order to create an Elasticsearch instance")
+		if c.ClusterVpcID == "" {
+			return errors.New("ClusterVpcID must be set in order to create an Elasticsearch instance")
 		}
 
 		domainName := c.ClusterName + "-es"
@@ -407,14 +474,6 @@ func (c *Config) validateElasticSearchConfig() error {
 
 	if !strings.HasPrefix(c.ElasticSearchSettings.Version, "OpenSearch") {
 		return fmt.Errorf("Incorrect engine version: %s. Must start with %q", c.ElasticSearchSettings.Version, "OpenSearch")
-	}
-
-	if c.ElasticSearchSettings.SnapshotRepository == "" {
-		return fmt.Errorf("Empty SnapshotRepository. Must supply a value")
-	}
-
-	if c.ElasticSearchSettings.SnapshotName == "" {
-		return fmt.Errorf("Empty SnapshotName. Must supply a value")
 	}
 
 	return nil

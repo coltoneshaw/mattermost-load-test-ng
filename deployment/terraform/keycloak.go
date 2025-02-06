@@ -22,7 +22,7 @@ func (t *Terraform) setupKeycloak(extAgent *ssh.ExtAgent) error {
 	keycloakDir := "/opt/keycloak/keycloak-" + t.config.ExternalAuthProviderSettings.KeycloakVersion
 	keycloakBinPath := filepath.Join(keycloakDir, "bin")
 
-	mlog.Info("Configuring keycloak", mlog.String("host", t.output.KeycloakServer.PrivateIP))
+	mlog.Info("Configuring keycloak", mlog.String("host", t.output.KeycloakServer.GetConnectionIP()))
 	extraArguments := []string{}
 
 	command := "start"
@@ -30,7 +30,7 @@ func (t *Terraform) setupKeycloak(extAgent *ssh.ExtAgent) error {
 		command = "start-dev"
 	}
 
-	sshc, err := extAgent.NewClient(t.output.KeycloakServer.PrivateIP)
+	sshc, err := extAgent.NewClient(t.output.KeycloakServer.GetConnectionIP())
 	if err != nil {
 		return fmt.Errorf("error in getting ssh connection %w", err)
 	}
@@ -142,7 +142,7 @@ func (t *Terraform) setupKeycloak(extAgent *ssh.ExtAgent) error {
 	}
 
 	// Wait for keycloak to start
-	url := fmt.Sprintf("http://%s:8080/health", t.output.KeycloakServer.PublicDNS)
+	url := fmt.Sprintf("http://%s:8080/health", t.output.KeycloakServer.GetConnectionDNS())
 	timeout := time.After(120 * time.Second) // yes, is **that** slow
 	for {
 		resp, err := http.Get(url)
@@ -171,7 +171,12 @@ func (t *Terraform) setupKeycloak(extAgent *ssh.ExtAgent) error {
 	}
 
 	// Authenticate as admin to execute keycloak commands
-	_, err = sshc.RunCommand(fmt.Sprintf("%s/kcadm.sh config credentials --server http://127.0.0.1:8080 --user %s --password %s --realm master", keycloakBinPath, t.config.ExternalAuthProviderSettings.KeycloakAdminUser, t.config.ExternalAuthProviderSettings.KeycloakAdminPassword))
+	_, err = sshc.RunCommand(
+		fmt.Sprintf(`%s/kcadm.sh config credentials --server http://127.0.0.1:8080 --user %q --password %q --realm master`,
+			keycloakBinPath,
+			t.config.ExternalAuthProviderSettings.KeycloakAdminUser,
+			t.config.ExternalAuthProviderSettings.KeycloakAdminPassword,
+		))
 	if err != nil {
 		return fmt.Errorf("failed to authenticate keycloak admin: %w", err)
 	}
@@ -293,11 +298,11 @@ func (t *Terraform) IngestKeycloakDump() error {
 		return err
 	}
 
-	if output.KeycloakServer.PrivateIP == "" {
+	if output.KeycloakServer.GetConnectionIP() == "" {
 		return fmt.Errorf("no keycloak instances deployed")
 	}
 
-	client, err := extAgent.NewClient(output.KeycloakServer.PrivateIP)
+	client, err := extAgent.NewClient(output.KeycloakServer.GetConnectionIP())
 	if err != nil {
 		return fmt.Errorf("error in getting ssh connection %w", err)
 	}
@@ -351,7 +356,7 @@ func (t *Terraform) setupKeycloakAppConfig(sshc *ssh.Client, cfg *model.Config) 
 		return fmt.Errorf("error uploading saml-idp.crt: %s - %w", out, err)
 	}
 
-	keycloakUrl := keycloakScheme + "://" + t.output.KeycloakServer.PublicDNS + ":8080"
+	keycloakUrl := keycloakScheme + "://" + t.output.KeycloakServer.PrivateDNS + ":8080"
 
 	cfg.OpenIdSettings.Enable = model.NewPointer(true)
 	cfg.OpenIdSettings.ButtonText = model.NewPointer("OpenID Login")

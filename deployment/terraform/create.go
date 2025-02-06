@@ -23,7 +23,6 @@ import (
 	"github.com/mattermost/mattermost-load-test-ng/deployment/terraform/assets"
 	"github.com/mattermost/mattermost-load-test-ng/deployment/terraform/ssh"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/mattermost/mattermost/server/public/model"
@@ -84,24 +83,11 @@ func New(id string, cfg deployment.Config) (*Terraform, error) {
 }
 
 func ensureTerraformStateDir(dir string) error {
-	// Make sure that the state directory exists
-	_, err := os.Stat(dir)
-	if err == nil {
-		return nil
-	}
-
-	// Return any error different than the one showing
-	// that the directory does not exist
-	if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	// If it does not exist, create it
-	return os.Mkdir(dir, 0700)
+	return os.MkdirAll(dir, 0700)
 }
 
 // Create creates a new load test environment.
-func (t *Terraform) Create(initData bool) error {
+func (t *Terraform) Create(extAgent *ssh.ExtAgent, initData bool) error {
 	if err := t.preFlightCheck(); err != nil {
 		return err
 	}
@@ -112,11 +98,6 @@ func (t *Terraform) Create(initData bool) error {
 		if err := validateLicense(t.config.MattermostLicenseFile); err != nil {
 			return fmt.Errorf("license validation failed: %w", err)
 		}
-	}
-
-	extAgent, err := ssh.NewAgent()
-	if err != nil {
-		return err
 	}
 
 	var uploadPath string
@@ -163,7 +144,7 @@ func (t *Terraform) Create(initData bool) error {
 		"-input=false",
 		"-state="+t.getStatePath())
 
-	err = t.runCommand(nil, params...)
+	err := t.runCommand(nil, params...)
 	if err != nil {
 		return err
 	}
@@ -172,19 +153,24 @@ func (t *Terraform) Create(initData bool) error {
 		return err
 	}
 
-	// If we are restoring from a DB backup, then we need to hook up
+	// If we are restoring from a DB backup, or using an external database, then we need to hook up
 	// the security group to it.
-	if t.config.TerraformDBSettings.ClusterIdentifier != "" {
+	if t.config.TerraformDBSettings.ClusterIdentifier != "" || t.config.ExternalDBSettings.ClusterIdentifier != "" {
 		if len(t.output.DBSecurityGroup) == 0 {
 			return errors.New("No DB security group created")
+		}
+		var identifier string
+		if t.config.TerraformDBSettings.ClusterIdentifier != "" {
+			identifier = t.config.TerraformDBSettings.ClusterIdentifier
+		} else {
+			identifier = t.config.ExternalDBSettings.ClusterIdentifier
 		}
 
 		sgID := t.output.DBSecurityGroup[0].Id
 		args := []string{
-			"--profile=" + t.config.AWSProfile,
 			"rds",
 			"modify-db-cluster",
-			"--db-cluster-identifier=" + t.config.TerraformDBSettings.ClusterIdentifier,
+			"--db-cluster-identifier=" + identifier,
 			"--vpc-security-group-ids=" + sgID,
 			"--region=" + t.config.AWSRegion,
 		}
@@ -201,14 +187,16 @@ func (t *Terraform) Create(initData bool) error {
 	// policies: there can only be 10 such policies per region per account.
 	// Check the docs for more information:
 	// https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cloudwatch_limits_cwl.html
-	if err = t.checkCloudWatchLogsPolicy(); err != nil {
-		if err != ErrNotFound {
-			return fmt.Errorf("failed to check CloudWatchLogs policy: %w", err)
-		}
+	if t.config.ElasticSearchSettings.EnableCloudwatchLogs {
+		if err = t.checkCloudWatchLogsPolicy(); err != nil {
+			if err != ErrNotFound {
+				return fmt.Errorf("failed to check CloudWatchLogs policy: %w", err)
+			}
 
-		mlog.Info("No CloudWatchLogs policy found, creating a new one")
-		if err := t.createCloudWatchLogsPolicy(); err != nil {
-			return fmt.Errorf("failed creating CloudWatchLogs policy")
+			mlog.Info("No CloudWatchLogs policy found, creating a new one")
+			if err := t.createCloudWatchLogsPolicy(); err != nil {
+				return fmt.Errorf("failed creating CloudWatchLogs policy")
+			}
 		}
 	}
 
@@ -240,10 +228,10 @@ func (t *Terraform) Create(initData bool) error {
 			// This case will only succeed if siteURL is empty.
 			// And it's an error to have siteURL empty and set multiple proxies. (see (c *Config) validateProxyConfig)
 			// So we can safely take the DNS of the first entry.
-			siteURL = "http://" + t.output.Proxies[0].PrivateDNS
+			siteURL = "http://" + t.output.Proxies[0].GetConnectionDNS()
 		// SiteURL not defined, single app node: we use the app node's public DNS plus port
 		default:
-			siteURL = "http://" + t.output.Instances[0].PrivateDNS + ":8065"
+			siteURL = "http://" + t.output.Instances[0].GetConnectionDNS() + ":8065"
 		}
 
 		// Updating the config.json for each instance of app server
@@ -253,14 +241,14 @@ func (t *Terraform) Create(initData bool) error {
 
 		// The URL to ping cannot be the same as the site URL, since that one could contain a
 		// hostname that only instances know how to resolve
-		pingURL := t.output.Instances[0].PrivateDNS + ":8065"
+		pingURL := t.output.Instances[0].GetConnectionDNS() + ":8065"
 		if t.output.HasProxy() {
 			for _, inst := range t.output.Proxies {
 				// Updating the nginx config on proxy server
 				t.setupProxyServer(extAgent, inst)
 			}
 			// We can ping the server through any of the proxies, doesn't matter here.
-			pingURL = t.output.Proxies[0].PrivateDNS
+			pingURL = t.output.Proxies[0].GetConnectionDNS()
 		}
 
 		if err := pingServer("http://" + pingURL); err != nil {
@@ -279,7 +267,7 @@ func (t *Terraform) Create(initData bool) error {
 		defer wg.Done()
 		if t.output.HasElasticSearch() {
 			mlog.Info("Setting up Elasticsearch")
-			err := t.setupElasticSearchServer(extAgent, t.output.Instances[0].PrivateIP)
+			err := t.setupElasticSearchServer(extAgent, t.output.Instances[0].GetConnectionIP())
 
 			if err != nil {
 				errorsChan <- fmt.Errorf("unable to setup Elasticsearch server: %w", err)
@@ -290,49 +278,20 @@ func (t *Terraform) Create(initData bool) error {
 		errorsChan <- nil
 	}()
 
-	// Ingest DB dump
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// Note: This MUST be done after app servers have been set up.
-		// Otherwise, the vacuuming command will fail because no tables would
-		// have been created by then.
-		if t.output.HasDB() {
-			// Load the dump if specified
-			if !initData && t.config.DBDumpURI != "" {
-				err = t.IngestDump()
-				if err != nil {
-					errorsChan <- fmt.Errorf("failed to create ingest dump: %w", err)
-					return
-				}
-			}
-
-			if len(t.config.DBExtraSQL) > 0 {
-				// Run extra SQL commands if specified
-				if err := t.ExecuteCustomSQL(); err != nil {
-					errorsChan <- fmt.Errorf("failed to execute custom SQL: %w", err)
-					return
-				}
-			}
-
-			// Clear licenses data
-			if err := t.ClearLicensesData(); err != nil {
-				errorsChan <- fmt.Errorf("failed to clear old licenses data: %w", err)
+	// Ingest DB dump if specified
+	if t.output.HasDB() && !initData && t.config.DBDumpURI != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err = t.IngestDump()
+			if err != nil {
+				errorsChan <- fmt.Errorf("failed to create ingest dump: %w", err)
 				return
 			}
 
-			if t.config.TerraformDBSettings.InstanceEngine == "aurora-postgresql" {
-				// updatePostgresSettings does some housekeeping stuff like setting
-				// default_search_config and vacuuming tables.
-				if err := t.updatePostgresSettings(extAgent); err != nil {
-					errorsChan <- fmt.Errorf("could not modify default_search_text_config: %w", err)
-					return
-				}
-			}
-		}
-
-		errorsChan <- nil
-	}()
+			errorsChan <- nil
+		}()
+	}
 
 	// Fail on any errors from the two goroutines above
 	wg.Wait()
@@ -363,16 +322,54 @@ func (t *Terraform) Create(initData bool) error {
 	return nil
 }
 
+func (t *Terraform) PostProcessDatabase(extAgent *ssh.ExtAgent) error {
+	// If the deployment has no DB, do nothing
+	if !t.output.HasDB() {
+		return nil
+	}
+
+	if len(t.config.DBExtraSQL) > 0 {
+		// Run extra SQL commands if specified
+		if err := t.ExecuteCustomSQL(); err != nil {
+			return fmt.Errorf("failed to execute custom SQL: %w", err)
+		}
+	}
+
+	// Clear licenses data
+	if err := t.ClearLicensesData(); err != nil {
+		return fmt.Errorf("failed to clear old licenses data: %w", err)
+	}
+
+	if t.config.TerraformDBSettings.InstanceEngine == "aurora-postgresql" {
+		// updatePostgresSettings does some housekeeping stuff like setting
+		// default_search_config and vacuuming tables.
+		if err := t.updatePostgresSettings(extAgent); err != nil {
+			return fmt.Errorf("could not modify default_search_text_config: %w", err)
+		}
+	}
+
+	needsReboot, err := t.HasPendingRebootDBParams()
+	if err != nil {
+		return fmt.Errorf("failed to check whether the DB has pending-reboot parameters: %w", err)
+	}
+
+	if needsReboot {
+		return t.RebootDBInstances(extAgent)
+	}
+
+	return nil
+}
+
 func (t *Terraform) setupAppServers(extAgent *ssh.ExtAgent, uploadBinary bool, uploadRelease bool, uploadPath string, siteURL string) error {
 	for _, val := range t.output.Instances {
-		err := t.setupMMServer(extAgent, val.PublicIP, siteURL, uploadBinary, uploadRelease, uploadPath, val.Tags.Name)
+		err := t.setupMMServer(extAgent, val.GetConnectionIP(), siteURL, uploadBinary, uploadRelease, uploadPath, val.Tags.Name)
 		if err != nil {
 			return err
 		}
 	}
 
 	for _, val := range t.output.JobServers {
-		err := t.setupJobServer(extAgent, val.PublicIP, siteURL, uploadBinary, uploadRelease, uploadPath, val.Tags.Name)
+		err := t.setupJobServer(extAgent, val.GetConnectionIP(), siteURL, uploadBinary, uploadRelease, uploadPath, val.Tags.Name)
 		if err != nil {
 			return err
 		}
@@ -434,7 +431,7 @@ func (t *Terraform) setupAppServer(extAgent *ssh.ExtAgent, ip, siteURL, serviceF
 		return fmt.Errorf("batch upload failed: %w", err)
 	}
 
-	cmd := "sudo systemctl restart otelcol-contrib"
+	cmd := "sudo systemctl restart otelcol-contrib && sudo systemctl restart prometheus-node-exporter"
 	if out, err := sshc.RunCommand(cmd); err != nil {
 		return fmt.Errorf("error running ssh command %q, output: %q: %w", cmd, string(out), err)
 	}
@@ -536,7 +533,11 @@ func (t *Terraform) setupElasticSearchServer(extAgent *ssh.ExtAgent, ip string) 
 		return fmt.Errorf("unable to create SSH client with IP %q: %w", ip, err)
 	}
 
-	os, err := opensearch.New(esEndpoint, sshc, t.config.AWSProfile, t.config.AWSRegion)
+	awsCreds, err := t.GetAWSCreds()
+	if err != nil {
+		return fmt.Errorf("failed to get AWS credentials")
+	}
+	os, err := opensearch.New(esEndpoint, sshc, awsCreds, t.config.AWSRegion)
 	if err != nil {
 		return fmt.Errorf("unable to create Elasticserach client: %w", err)
 	}
@@ -554,6 +555,11 @@ func (t *Terraform) setupElasticSearchServer(extAgent *ssh.ExtAgent, ip string) 
 	mlog.Debug("Repositories registered", mlog.Array("repositories", repositories))
 
 	repo := esSettings.SnapshotRepository
+	snapshotName := esSettings.SnapshotName
+	if snapshotName == "" {
+		mlog.Debug("No Opensearch snapshot name given. Not restoring to any snapshot.")
+		return nil
+	}
 
 	// Check if the registered repositories already include the one configured
 	repoFound := false
@@ -582,7 +588,6 @@ func (t *Terraform) setupElasticSearchServer(extAgent *ssh.ExtAgent, ip string) 
 
 	// Look for the configured snapshot
 	var snapshot opensearch.Snapshot
-	snapshotName := esSettings.SnapshotName
 	for _, s := range snapshots {
 		if s.Name == snapshotName {
 			snapshot = s
@@ -759,9 +764,7 @@ func genNginxConfig() (string, error) {
 }
 
 func (t *Terraform) getProxyInstanceInfo() (*types.InstanceTypeInfo, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
-		awsconfig.WithSharedConfigProfile(t.config.AWSProfile),
-	)
+	cfg, err := t.GetAWSConfig()
 	if err != nil {
 		return nil, fmt.Errorf("error loading AWS config: %v", err)
 	}
@@ -779,7 +782,7 @@ func (t *Terraform) getProxyInstanceInfo() (*types.InstanceTypeInfo, error) {
 }
 
 func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent, instance Instance) {
-	ip := instance.PublicDNS
+	ip := instance.GetConnectionDNS()
 
 	sshc, err := extAgent.NewClient(ip)
 	if err != nil {
@@ -861,7 +864,7 @@ func (t *Terraform) setupProxyServer(extAgent *ssh.ExtAgent, instance Instance) 
 			return
 		}
 
-		cmd := "sudo systemctl restart otelcol-contrib"
+		cmd := "sudo systemctl restart otelcol-contrib && sudo systemctl restart prometheus-node-exporter"
 		if out, err := sshc.RunCommand(cmd); err != nil {
 			mlog.Error("error running ssh command", mlog.String("output", string(out)), mlog.String("cmd", cmd), mlog.Err(err))
 			return
@@ -883,7 +886,7 @@ func (t *Terraform) createAdminUser(extAgent *ssh.ExtAgent) error {
 		t.config.AdminPassword,
 	)
 	mlog.Info("Creating admin user:", mlog.String("cmd", cmd))
-	sshc, err := extAgent.NewClient(t.output.Instances[0].PrivateIP)
+	sshc, err := extAgent.NewClient(t.output.Instances[0].GetConnectionIP())
 	if err != nil {
 		return err
 	}
@@ -909,7 +912,7 @@ func (t *Terraform) updatePostgresSettings(extAgent *ssh.ExtAgent) error {
 		return errors.New("no instances found in Terraform output")
 	}
 
-	sshc, err := extAgent.NewClient(t.output.Instances[0].PrivateIP)
+	sshc, err := extAgent.NewClient(t.output.Instances[0].GetConnectionIP())
 	if err != nil {
 		return err
 	}
@@ -1066,10 +1069,10 @@ func (t *Terraform) updateAppConfig(siteURL string, sshc *ssh.Client, jobServerE
 	}
 
 	if t.output.HasRedis() {
-		cfg.CacheSettings.CacheType = model.NewString(model.CacheTypeRedis)
+		cfg.CacheSettings.CacheType = model.NewPointer(model.CacheTypeRedis)
 		redisEndpoint := net.JoinHostPort(t.output.RedisServer.Address, strconv.Itoa(t.output.RedisServer.Port))
-		cfg.CacheSettings.RedisAddress = model.NewString(redisEndpoint)
-		cfg.CacheSettings.RedisDB = model.NewInt(0)
+		cfg.CacheSettings.RedisAddress = model.NewPointer(redisEndpoint)
+		cfg.CacheSettings.RedisDB = model.NewPointer(0)
 	}
 
 	if t.config.MattermostConfigPatchFile != "" {
@@ -1116,7 +1119,7 @@ func (t *Terraform) preFlightCheck() error {
 		return fmt.Errorf("failed when checking terraform version: %w", err)
 	}
 
-	if err := checkAWSCLI(t.Config().AWSProfile); err != nil {
+	if err := t.checkAWSCLI(); err != nil {
 		return fmt.Errorf("failed when checking AWS CLI: %w", err)
 	}
 

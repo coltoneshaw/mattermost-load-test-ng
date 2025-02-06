@@ -47,9 +47,9 @@ func (ue *UserEntity) SignUp(email, username, password string) error {
 			return fmt.Errorf("error while signing up using %s: %w", ue.config.AuthenticationType, err)
 		}
 
-		newUser, _, err = ue.client.GetUserByUsername(context.Background(), username, "")
+		newUser, _, err = ue.client.GetUserByEmail(context.Background(), email, "")
 		if err != nil {
-			return fmt.Errorf("error while getting user by username: %w", err)
+			return fmt.Errorf("error while getting user by email: %w", err)
 		}
 
 	default:
@@ -194,9 +194,9 @@ func (ue *UserEntity) Login() error {
 			return fmt.Errorf("error while logging in using %s: %w", ue.config.AuthenticationType, err)
 		}
 
-		loggedUser, _, err = ue.client.GetUserByUsername(context.Background(), user.Username, "")
+		loggedUser, _, err = ue.client.GetUserByEmail(context.Background(), user.Email, "")
 		if err != nil {
-			return fmt.Errorf("error while getting user by username through %s: %w", ue.config.AuthenticationType, err)
+			return fmt.Errorf("error while getting user by email through %s: %w", ue.config.AuthenticationType, err)
 		}
 	default:
 		loggedUser, _, err = ue.client.Login(context.Background(), user.Email, user.Password)
@@ -1394,7 +1394,15 @@ func (ue *UserEntity) GetPostThreadWithOpts(threadId, etag string, opts model.Ge
 	if postList == nil || len(postList.Posts) == 0 {
 		return nil, false, nil
 	}
-	return postList.Order, postList.HasNext, ue.store.SetPosts(postListToSlice(postList))
+
+	var hasNext bool
+	if postList.HasNext != nil {
+		hasNext = *postList.HasNext
+	} else {
+		hasNext = false
+	}
+
+	return postList.Order, hasNext, ue.store.SetPosts(postListToSlice(postList))
 }
 
 // MarkAllThreadsInTeamAsRead marks all threads in the given team as read
