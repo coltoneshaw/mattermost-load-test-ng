@@ -2,6 +2,7 @@ package terraform
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -196,7 +197,11 @@ func (t *Terraform) setupKeycloak(extAgent *ssh.ExtAgent) error {
 		mlog.Info("Overriding the users file path with the generated one from keycloak")
 		t.config.UsersFilePath = t.getAsset("keycloak-users.txt")
 	}
-
+	var patch model.Config
+	err = t.setupKeycloakAppConfig(sshc, &patch)
+	if err != nil {
+		return fmt.Errorf(err.Error())
+	}
 	mlog.Info("Keycloak configured")
 
 	return nil
@@ -340,21 +345,21 @@ func (t *Terraform) IngestKeycloakDump() error {
 
 // setupKeycloakAppConfig sets up the Keycloak configuration in the Mattermost server for OpenID
 // and SAML.
-func (t *Terraform) setupKeycloakAppConfig(sshc *ssh.Client, cfg *model.Config) error {
+func (t *Terraform) setupKeycloakAppConfig(_ *ssh.Client, cfg *model.Config) error {
 	keycloakScheme := "https"
 	if t.config.ExternalAuthProviderSettings.DevelopmentMode {
 		keycloakScheme = "http"
 	}
 
 	// Setup SAML certificate for Keycloak
-	samlIDPCert, err := os.Open(t.getAsset("saml-idp.crt"))
-	if err != nil {
-		return fmt.Errorf("error opening saml-idp.crt: %w", err)
-	}
+	// samlIDPCert, err := os.Open(t.getAsset("saml-idp.crt"))
+	// if err != nil {
+	// 	return fmt.Errorf("error opening saml-idp.crt: %w", err)
+	// }
 
-	if out, err := sshc.Upload(samlIDPCert, "/opt/mattermost/config/saml-idp.crt", false); err != nil {
-		return fmt.Errorf("error uploading saml-idp.crt: %s - %w", out, err)
-	}
+	// if out, err := sshc.Upload(samlIDPCert, "/opt/mattermost/config/saml-idp.crt", false); err != nil {
+	// 	return fmt.Errorf("error uploading saml-idp.crt: %s - %w", out, err)
+	// }
 
 	keycloakUrl := keycloakScheme + "://" + t.output.KeycloakServer.PrivateDNS + ":8080"
 
@@ -397,6 +402,23 @@ func (t *Terraform) setupKeycloakAppConfig(sshc *ssh.Client, cfg *model.Config) 
 	cfg.SamlSettings.LoginButtonColor = model.NewPointer("#34a28b")
 	cfg.SamlSettings.LoginButtonBorderColor = model.NewPointer("#2389D7")
 	cfg.SamlSettings.LoginButtonTextColor = model.NewPointer("#ffffff")
+
+	// Convert the struct to JSON
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		fmt.Printf("Error marshalling config to JSON: %v\n", err)
+		return err
+	}
+
+	// Write JSON to a file
+	fileName := "config.json"
+	err = os.WriteFile(fileName, data, 0644)
+	if err != nil {
+		fmt.Printf("Error writing to file %s: %v\n", fileName, err)
+		return err
+	}
+
+	mlog.Info("Configuration saved to ")
 
 	return nil
 }
