@@ -123,10 +123,6 @@ resource "aws_opensearch_domain" "es_server" {
   }
   CONFIG
 
-  depends_on = [
-    aws_iam_service_linked_role.es,
-  ]
-
   dynamic "log_publishing_options" {
     for_each = var.es_enable_cloudwatch_logs ? [true] : []
     content {
