@@ -72,7 +72,7 @@
     "DataSource": "",
     "DataSourceReplicas": [],
     "DataSourceSearchReplicas": [],
-    "ClusterIdentifier": "",
+    "ClusterIdentifier": ""
   },
   "ExternalBucketSettings": {
     "AmazonS3AccessKeyId": "",
