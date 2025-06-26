@@ -31,6 +31,10 @@ type Config struct {
 	AWSAvailabilityZone string `default:"us-east-1c"`
 	// AWSAMI is the AMI to use for all EC2 instances.
 	AWSAMI string `default:"ami-0fa37863afb290840"`
+	// OperatingSystem
+	OperatingSystemKind string `default:"debian" validate:"oneof:{debian,rhel}"`
+	// AWSAMIUser is the user to use when connecting to the AMI.
+	AWSAMIUser string `default:"ubuntu"`
 	// ClusterName is the name of the cluster.
 	ClusterName string `default:"loadtest" validate:"alpha"`
 	// ClusterVpcID is the id of the VPC associated to the resources.
@@ -45,6 +49,8 @@ type Config struct {
 	AppInstanceType string `default:"c7i.xlarge" validate:"notempty"`
 	// IAM role to attach to the app servers
 	AppAttachIAMProfile string `default:""`
+	// EnableMetricsInstance enables deploying a metrics instance
+	EnableMetricsInstance bool `default:"true"`
 	// Type of the EC2 instance for metrics.
 	MetricsInstanceType string `default:"t3.xlarge" validate:"notempty"`
 	// Number of agents, first agent and coordinator will share the same instance.
@@ -121,6 +127,8 @@ type Config struct {
 	// Mattermost servers. This is used to override the server URL in the agent's config in case there's a
 	// proxy in front of the Mattermost server.
 	ServerURL string `default:""`
+	// ServerScheme is the scheme to use when connecting to the Mattermost server.
+	ServerScheme string `default:"http" validate:"oneof:{http,https}"`
 	// UsersFilePath specifies the path to an optional file containing a list of credentials for the controllers
 	// to use. If present, it is used to automatically upload it to the agents and override the agent's config's
 	// own UsersFilePath.
@@ -501,4 +509,20 @@ func ReadConfig(configFilePath string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// MarkForDestroyAllButMetrics overrides all created resources setting their instance
+// counts to 0 or their enable flags to false, so that everything is destroyed
+// in the next Create except for the metrics instance and related resources.
+// Note that this list should be kept up-to-date when new resources are added
+// to the Terraform files.
+func (c *Config) MarkForDestroyAllButMetrics() {
+	c.AppInstanceCount = 0
+	c.ProxyInstanceCount = 0
+	c.AgentInstanceCount = 0
+	c.TerraformDBSettings.InstanceCount = 0
+	c.ElasticSearchSettings.InstanceCount = 0
+	c.RedisSettings.Enabled = false
+	c.JobServerSettings.InstanceCount = 0
+	c.ExternalAuthProviderSettings.Enabled = false
 }

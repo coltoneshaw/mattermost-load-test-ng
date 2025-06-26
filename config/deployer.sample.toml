@@ -14,7 +14,8 @@ MattermostDownloadURL = 'https://latest.mattermost.com/mattermost-enterprise-lin
 MattermostLicenseFile = ''
 S3BucketDumpURI = ''
 SiteURL = ''
-EnableNetPeekMetrics = false
+ServerURL = ''
+ServerScheme = 'http'
 
 # Agent configuration
 AgentInstanceCount = 2
@@ -28,6 +29,7 @@ AppInstanceType = 'c5.xlarge'
 AppAttachIAMProfile = ''
 
 # Metrics instance configuration
+EnableMetricsInstance = true
 MetricsInstanceType = 't3.xlarge'
 
 # Cluster configuration
@@ -46,6 +48,9 @@ TerraformStateDir = '/var/lib/mattermost-load-test-ng'
 ProxyInstanceType = 'c5.xlarge'
 ProxyInstanceCount = 1
 ProxyAllocatePublicIPAddress = true
+
+# Metrics
+EnableNetPeekMetrics = false
 
 [ClusterSubnetIDs]
 App = []

@@ -20,6 +20,7 @@
   "AppInstanceCount": 1,
   "AppInstanceType": "c7i.xlarge",
   "AppAttachIAMProfile": "",
+  "EnableMetricsInstance": true,
   "MetricsInstanceType": "t3.xlarge",
   "AgentInstanceCount": 2,
   "AgentInstanceType": "c7i.xlarge",
@@ -56,6 +57,8 @@
   "S3BucketDumpURI" : "",
   "DBDumpURI": "",
   "SiteURL": "",
+  "ServerURL": "",
+  "ServerScheme": "http",
   "EnableNetPeekMetrics": false,
   "TerraformDBSettings": {
     "InstanceCount": 1,
